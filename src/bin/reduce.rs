@@ -23,19 +23,17 @@ fn main() -> anyhow::Result<()> {
         .collect::<Vec<_>>();
     let mut global = vec![0; bytes / mem::size_of::<f32>()];
 
-    let mut time = 0.0f64;
-
     world.barrier();
-    time -= mpi::time();
+    let start = mpi::time();
     if world.rank() == root.rank() {
         root.reduce_into_root(&local, &mut global, SystemOperation::sum());
     } else {
         root.reduce_into(&local, SystemOperation::sum());
     }
-    time += mpi::time();
+    let end = mpi::time();
 
     if world.rank() == 0 {
-        println!("MPI_Reduce duration = {time}");
+        println!("MPI_Reduce duration = {}", end - start);
     }
 
     Ok(())

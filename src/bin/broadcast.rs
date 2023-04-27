@@ -23,15 +23,13 @@ fn main() -> anyhow::Result<()> {
             .for_each(|(index, element)| *element = index as u8);
     }
 
-    let mut time = 0.0f64;
-
     world.barrier();
-    time -= mpi::time();
+    let start = mpi::time();
     root.broadcast_into(&mut buffer[..]);
-    time += mpi::time();
+    let end = mpi::time();
 
     if world.rank() == root.rank() {
-        println!("MPI_Bcast duration = {time}");
+        println!("MPI_Bcast duration = {}", end - start);
     }
 
     Ok(())

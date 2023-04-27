@@ -21,15 +21,14 @@ fn main() -> anyhow::Result<()> {
         .collect::<Vec<_>>();
 
     let mut global = vec![0; bytes / mem::size_of::<f32>()];
-    let mut time = 0.0f64;
 
     world.barrier();
-    time -= mpi::time();
+    let start = mpi::time();
     world.all_reduce_into(&local, &mut global[..], SystemOperation::sum());
-    time += mpi::time();
+    let end = mpi::time();
 
     if world.rank() == 0 {
-        println!("MPI_Allreduce duration = {time}");
+        println!("MPI_Allreduce duration = {}", end - start);
     }
 
     Ok(())

@@ -7,4 +7,8 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0"
+libloading = "0.8"
 mpi = "0.6"
+
+[lib]
+crate-type = ["cdylib"]

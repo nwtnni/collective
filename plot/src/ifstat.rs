@@ -53,15 +53,34 @@ impl Plot for Ifstat {
         let root = BitMapBackend::new(&self.output, (1920, 1080)).into_drawing_area();
         root.fill(&WHITE)?;
 
-        let (x_max, y_max) =
-            logs.values()
-                .flatten()
-                .fold((f64::MIN, f64::MIN), |(x_max, y_max), (x, y)| {
-                    (
-                        if x_max > *x { x_max } else { *x },
-                        if y_max > *y { y_max } else { *y },
-                    )
-                });
+        let (x_max, receive_max, transmit_max) = logs.values().flatten().fold(
+            (f64::MIN, f64::MIN, f64::MIN),
+            |(x_max, receive_max, transmit_max), (x, receive, transmit)| {
+                (
+                    if x_max > *x { x_max } else { *x },
+                    if receive_max > *receive {
+                        receive_max
+                    } else {
+                        *receive
+                    },
+                    if transmit_max > *transmit {
+                        transmit_max
+                    } else {
+                        *transmit
+                    },
+                )
+            },
+        );
+
+        let y_max = match (self.receive, self.transmit) {
+            (true, true) if receive_max > transmit_max => receive_max,
+            (true, true) => transmit_max,
+            (true, false) => receive_max,
+            (false, true) => transmit_max,
+            (false, false) => {
+                unreachable!("[INTERNAL ERROR]: clap requires one of --receive or --transmit")
+            }
+        };
 
         let mut context = ChartBuilder::on(&root)
             .set_left_and_bottom_label_area_size(50)
@@ -69,24 +88,38 @@ impl Plot for Ifstat {
             .build_cartesian_2d(0.0..x_max + 10.0, 0.0..y_max + 10.0)?;
 
         context.configure_mesh().draw()?;
-        context.draw_series(LineSeries::new(logs[&0].iter().copied(), GREEN))?;
+
+        if self.receive {
+            context.draw_series(LineSeries::new(
+                logs[&0].iter().map(|(time, receive, _)| (*time, *receive)),
+                GREEN,
+            ))?;
+        }
+
+        if self.transmit {
+            context.draw_series(LineSeries::new(
+                logs[&0]
+                    .iter()
+                    .map(|(time, _, transmit)| (*time, *transmit)),
+                GREEN,
+            ))?;
+        }
 
         Ok(())
     }
 }
 
-fn parse_file(path: &Path, throughput: bool) -> anyhow::Result<Vec<(f64, f64)>> {
+fn parse_file(path: &Path, throughput: bool) -> anyhow::Result<Vec<(f64, f64, f64)>> {
     fs::read_to_string(path)?
         .trim()
         .split('\n')
         .map(|line| -> anyhow::Result<_> {
             let mut iter = line.split_whitespace().skip(1);
             let time = iter.next().unwrap().parse::<f64>()?;
-            let value = iter
-                .nth(if throughput { 2 } else { 0 })
-                .unwrap()
-                .parse::<f64>()?;
-            Ok((time, value))
+            let (receive, transmit) = if throughput { (2, 2) } else { (0, 2) };
+            let receive = iter.nth(receive).unwrap().parse::<f64>()?;
+            let transmit = iter.nth(transmit).unwrap().parse::<f64>()?;
+            Ok((time, receive, transmit))
         })
         .collect::<Result<Vec<_>, _>>()
 }

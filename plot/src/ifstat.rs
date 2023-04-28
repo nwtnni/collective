@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use std::path::PathBuf;
-use std::str::FromStr;
 
 use anyhow::anyhow;
 use anyhow::Context as _;
@@ -13,18 +12,27 @@ use crate::Plot;
 
 #[derive(Parser)]
 pub struct Ifstat {
+    /// Sum statistics over all machines.
     #[arg(short, long)]
     sum: bool,
 
-    #[arg(short, long)]
+    /// Plot bytes/sec transferred instead of bytes transferred.
+    #[arg(long)]
     throughput: bool,
 
-    #[arg(short, long, required = true)]
-    direction: Direction,
+    /// Plot inbound statistics.
+    #[arg(short, long, required_unless_present = "transmit")]
+    receive: bool,
 
+    /// Plot outbound statistics.
+    #[arg(short, long, required_unless_present = "receive")]
+    transmit: bool,
+
+    /// Write plot to disk.
     #[arg(short, long, default_value = "out.png")]
     output: PathBuf,
 
+    /// `ifstat` log files to parse. Requires file name in `<INDEX>-<NAME>` format.
     logs: Vec<PathBuf>,
 }
 
@@ -100,24 +108,4 @@ fn parse_path(path: &Path) -> anyhow::Result<usize> {
                 path.display()
             )
         })
-}
-
-#[derive(Copy, Clone, PartialEq, Eq)]
-enum Direction {
-    Receive,
-    Transmit,
-}
-
-impl FromStr for Direction {
-    type Err = anyhow::Error;
-    fn from_str(string: &str) -> Result<Self, Self::Err> {
-        match string {
-            "receive" | "r" | "in" | "i" => Ok(Direction::Receive),
-            "transmit" | "t" | "out" | "o" => Ok(Direction::Transmit),
-            unknown => Err(anyhow!(
-                "Expected one of {{[r]eceive, [t]ransmit, [i]n, [o]ut}}, but got {}",
-                unknown
-            )),
-        }
-    }
 }

@@ -36,27 +36,9 @@ impl Plot for Ifstat {
             .map(|path| -> anyhow::Result<_> {
                 Ok((
                     parse_path(path)?,
-                    fs::read_to_string(path)
+                    parse_file(path, self.throughput)
                         .with_context(|| anyhow!("Failed to read {}", path.display()))?,
                 ))
-            })
-            .map(|result| -> anyhow::Result<_> {
-                let (index, data) = result?;
-                let data = data
-                    .trim()
-                    .split('\n')
-                    .map(|line| -> anyhow::Result<_> {
-                        let mut iter = line.split_whitespace().skip(1);
-                        let time = iter.next().unwrap().parse::<f64>()?;
-                        let value = iter
-                            .nth(if self.throughput { 2 } else { 0 })
-                            .unwrap()
-                            .parse::<f64>()?;
-                        Ok((time, value))
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
-
-                Ok((index, data))
             })
             .collect::<Result<HashMap<_, _>, _>>()?;
 
@@ -85,10 +67,27 @@ impl Plot for Ifstat {
     }
 }
 
+fn parse_file(path: &Path, throughput: bool) -> anyhow::Result<Vec<(f64, f64)>> {
+    fs::read_to_string(path)?
+        .trim()
+        .split('\n')
+        .map(|line| -> anyhow::Result<_> {
+            let mut iter = line.split_whitespace().skip(1);
+            let time = iter.next().unwrap().parse::<f64>()?;
+            let value = iter
+                .nth(if throughput { 2 } else { 0 })
+                .unwrap()
+                .parse::<f64>()?;
+            Ok((time, value))
+        })
+        .collect::<Result<Vec<_>, _>>()
+}
+
 fn parse_path(path: &Path) -> anyhow::Result<usize> {
     let name = path
         .file_name()
         .ok_or_else(|| anyhow!("Expected path with file name, but got {}", path.display()))?;
+
     let name = name
         .to_str()
         .ok_or_else(|| anyhow!("Expected Unicode path name, but got {}", path.display()))?;

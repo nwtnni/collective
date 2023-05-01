@@ -63,11 +63,10 @@ impl Plot for Ifstat {
         let root = SVGBackend::new(&self.output, (1920, 1080)).into_drawing_area();
         root.fill(&WHITE)?;
 
-        let (x_max, receive_max, transmit_max) = logs.values().flatten().fold(
-            (f64::MIN, f64::MIN, f64::MIN),
-            |(x_max, receive_max, transmit_max), (x, receive, transmit)| {
+        let (receive_max, transmit_max) = logs.values().flatten().fold(
+            (f64::MIN, f64::MIN),
+            |(receive_max, transmit_max), (_, receive, transmit)| {
                 (
-                    if x_max > *x { x_max } else { *x },
                     if receive_max > *receive {
                         receive_max
                     } else {
@@ -82,12 +81,33 @@ impl Plot for Ifstat {
             },
         );
 
-        let x_min = self.x_min.unwrap_or(0.0);
-        let x_max = self.x_max.unwrap_or(x_max);
+        let x_min = self.x_min.unwrap_or_else(|| {
+            logs.values()
+                .map(|log| {
+                    constrict(
+                        log.iter()
+                            .map(|(time, receive, transmit)| (*time, receive.max(*transmit))),
+                    )
+                })
+                .min_by(f64::total_cmp)
+                .expect("[INTERNAL ERROR]: `logs` is nonempty")
+        });
+
+        let x_max = self.x_max.unwrap_or_else(|| {
+            logs.values()
+                .map(|log| {
+                    constrict(
+                        log.iter()
+                            .rev()
+                            .map(|(time, receive, transmit)| (*time, receive.min(*transmit))),
+                    )
+                })
+                .max_by(f64::total_cmp)
+                .expect("[INTERNAL ERROR]: `logs` is nonempty")
+        });
 
         let y_max = match (self.receive, self.transmit) {
-            (true, true) if receive_max > transmit_max => receive_max,
-            (true, true) => transmit_max,
+            (true, true) => receive_max.max(transmit_max),
             (true, false) => receive_max,
             (false, true) => transmit_max,
             (false, false) => {
@@ -163,6 +183,19 @@ impl Plot for Ifstat {
 
         Ok(())
     }
+}
+
+fn constrict<I: IntoIterator<Item = (f64, f64)>>(data: I) -> f64 {
+    let mut data = data.into_iter();
+    let (mut xi, yi) = data.next().unwrap();
+    for (x, y) in data {
+        if (yi - y).abs() < 1e-9 {
+            break;
+        } else {
+            xi = x;
+        }
+    }
+    xi
 }
 
 fn parse_file(path: &Path, throughput: bool) -> anyhow::Result<Vec<(f64, f64, f64)>> {

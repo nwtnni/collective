@@ -28,6 +28,14 @@ pub struct Ifstat {
     #[arg(short, long, required_unless_present = "receive")]
     transmit: bool,
 
+    /// Minimum of time window to plot
+    #[arg(long)]
+    x_min: Option<f64>,
+
+    /// Maximum of time window to plot
+    #[arg(long)]
+    x_max: Option<f64>,
+
     /// Write plot to disk.
     #[arg(short, long, default_value = "out.svg")]
     output: PathBuf,
@@ -74,6 +82,9 @@ impl Plot for Ifstat {
             },
         );
 
+        let x_min = self.x_min.unwrap_or(0.0);
+        let x_max = self.x_max.unwrap_or(x_max);
+
         let y_max = match (self.receive, self.transmit) {
             (true, true) if receive_max > transmit_max => receive_max,
             (true, true) => transmit_max,
@@ -90,7 +101,7 @@ impl Plot for Ifstat {
                 format!("Network data transfer for {name} benchmark"),
                 ("sans-serif", 20),
             )
-            .build_cartesian_2d(0.0..x_max, 0.0..y_max)?;
+            .build_cartesian_2d(0.0..x_max - x_min, 0.0..y_max)?;
 
         context
             .configure_mesh()
@@ -108,17 +119,16 @@ impl Plot for Ifstat {
 
                 context
                     .draw_series(LineSeries::new(
-                        log.iter().map(|(time, receive, _)| (*time, *receive)),
+                        log.iter()
+                            .map(|(time, receive, _)| (*time - x_min, *receive)),
                         color,
                     ))?
                     .label(format!("Received (Node {index})"))
                     .legend(move |(x, y)| Circle::new((x + 10, y), 5, color.filled()));
 
-                context.draw_series(
-                    log.iter().map(|(time, receive, _)| {
-                        Circle::new((*time, *receive), 2, color.filled())
-                    }),
-                )?;
+                context.draw_series(log.iter().map(|(time, receive, _)| {
+                    Circle::new((*time - x_min, *receive), 2, color.filled())
+                }))?;
             }
         }
 
@@ -129,15 +139,17 @@ impl Plot for Ifstat {
 
                 context
                     .draw_series(LineSeries::new(
-                        log.iter().map(|(time, _, transmit)| (*time, *transmit)),
+                        log.iter()
+                            .map(|(time, _, transmit)| (*time - x_min, *transmit)),
                         color,
                     ))?
                     .label(format!("Transmitted (Node {index})"))
                     .legend(move |(x, y)| Cross::new((x + 10, y), 5, color.filled()));
 
                 context.draw_series(
-                    log.iter()
-                        .map(|(time, _, transmit)| Cross::new((*time, *transmit), 2, color)),
+                    log.iter().map(|(time, _, transmit)| {
+                        Cross::new((*time - x_min, *transmit), 2, color)
+                    }),
                 )?;
             }
         }

@@ -29,7 +29,7 @@ pub struct Ifstat {
     transmit: bool,
 
     /// Write plot to disk.
-    #[arg(short, long, default_value = "out.png")]
+    #[arg(short, long, default_value = "out.svg")]
     output: PathBuf,
 
     /// `ifstat` log files to parse. Requires file name in `<INDEX>-<NAME>` format.
@@ -50,7 +50,7 @@ impl Plot for Ifstat {
             })
             .collect::<Result<HashMap<_, _>, _>>()?;
 
-        let root = BitMapBackend::new(&self.output, (1920, 1080)).into_drawing_area();
+        let root = SVGBackend::new(&self.output, (1920, 1080)).into_drawing_area();
         root.fill(&WHITE)?;
 
         let (x_max, receive_max, transmit_max) = logs.values().flatten().fold(
@@ -90,19 +90,29 @@ impl Plot for Ifstat {
         context.configure_mesh().draw()?;
 
         if self.receive {
-            context.draw_series(LineSeries::new(
-                logs[&0].iter().map(|(time, receive, _)| (*time, *receive)),
-                GREEN,
-            ))?;
+            for (index, log) in &logs {
+                context.draw_series(LineSeries::new(
+                    log.iter().map(|(time, receive, _)| (*time, *receive)),
+                    Palette99::pick(*index),
+                ))?;
+
+                context.draw_series(log.iter().map(|(time, receive, _)| {
+                    Circle::new((*time, *receive), 1, Palette99::pick(*index).filled())
+                }))?;
+            }
         }
 
         if self.transmit {
-            context.draw_series(LineSeries::new(
-                logs[&0]
-                    .iter()
-                    .map(|(time, _, transmit)| (*time, *transmit)),
-                GREEN,
-            ))?;
+            for (index, log) in &logs {
+                context.draw_series(LineSeries::new(
+                    log.iter().map(|(time, _, transmit)| (*time, *transmit)),
+                    Palette99::pick(*index),
+                ))?;
+
+                context.draw_series(log.iter().map(|(time, _, transmit)| {
+                    Cross::new((*time, *transmit), 1, Palette99::pick(*index))
+                }))?;
+            }
         }
 
         Ok(())

@@ -85,9 +85,13 @@ impl Plot for Ifstat {
         let mut context = ChartBuilder::on(&root)
             .set_left_and_bottom_label_area_size(50)
             .caption("ifstat", ("sans-serif", 20))
-            .build_cartesian_2d(0.0..x_max + 10.0, 0.0..y_max + 10.0)?;
+            .build_cartesian_2d(0.0..x_max, 0.0..y_max)?;
 
-        context.configure_mesh().draw()?;
+        context
+            .configure_mesh()
+            .x_desc("Time Elapsed (sec)")
+            .y_desc("Data Transferred (GiB)")
+            .draw()?;
 
         if self.receive {
             for (index, log) in &logs {
@@ -125,10 +129,10 @@ fn parse_file(path: &Path, throughput: bool) -> anyhow::Result<Vec<(f64, f64, f6
         .split('\n')
         .map(|line| -> anyhow::Result<_> {
             let mut iter = line.split_whitespace().skip(1);
-            let time = iter.next().unwrap().parse::<f64>()?;
+            let time = iter.next().unwrap().parse::<f64>()? / 1e9;
             let (receive, transmit) = if throughput { (2, 2) } else { (0, 2) };
-            let receive = iter.nth(receive).unwrap().parse::<f64>()?;
-            let transmit = iter.nth(transmit).unwrap().parse::<f64>()?;
+            let receive = iter.nth(receive).unwrap().parse::<f64>()? / 1e9;
+            let transmit = iter.nth(transmit).unwrap().parse::<f64>()? / 1e9;
             Ok((time, receive, transmit))
         })
         .collect::<Result<Vec<_>, _>>()

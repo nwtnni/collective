@@ -38,12 +38,14 @@ pub struct Ifstat {
 
 impl Plot for Ifstat {
     fn plot(self) -> anyhow::Result<()> {
+        let (_, name) = parse_path(&self.logs[0])?;
+
         let logs = self
             .logs
             .iter()
             .map(|path| -> anyhow::Result<_> {
                 Ok((
-                    parse_path(path)?,
+                    parse_path(path)?.0,
                     parse_file(path, self.throughput)
                         .with_context(|| anyhow!("Failed to read {}", path.display()))?,
                 ))
@@ -84,7 +86,10 @@ impl Plot for Ifstat {
 
         let mut context = ChartBuilder::on(&root)
             .set_left_and_bottom_label_area_size(50)
-            .caption("ifstat", ("sans-serif", 20))
+            .caption(
+                format!("Network data transfer for {name} benchmark"),
+                ("sans-serif", 20),
+            )
             .build_cartesian_2d(0.0..x_max, 0.0..y_max)?;
 
         context
@@ -93,31 +98,56 @@ impl Plot for Ifstat {
             .y_desc("Data Transferred (GiB)")
             .draw()?;
 
-        if self.receive {
-            for (index, log) in &logs {
-                context.draw_series(LineSeries::new(
-                    log.iter().map(|(time, receive, _)| (*time, *receive)),
-                    Palette99::pick(*index),
-                ))?;
+        let mut order = logs.keys().copied().collect::<Vec<_>>();
+        order.sort();
 
-                context.draw_series(log.iter().map(|(time, receive, _)| {
-                    Circle::new((*time, *receive), 1, Palette99::pick(*index).filled())
-                }))?;
+        if self.receive {
+            for index in &order {
+                let log = &logs[index];
+                let color = Palette99::pick(*index).to_rgba();
+
+                context
+                    .draw_series(LineSeries::new(
+                        log.iter().map(|(time, receive, _)| (*time, *receive)),
+                        color,
+                    ))?
+                    .label(format!("Received (Node {index})"))
+                    .legend(move |(x, y)| Circle::new((x + 10, y), 5, color.filled()));
+
+                context.draw_series(
+                    log.iter().map(|(time, receive, _)| {
+                        Circle::new((*time, *receive), 2, color.filled())
+                    }),
+                )?;
             }
         }
 
         if self.transmit {
-            for (index, log) in &logs {
-                context.draw_series(LineSeries::new(
-                    log.iter().map(|(time, _, transmit)| (*time, *transmit)),
-                    Palette99::pick(*index),
-                ))?;
+            for index in &order {
+                let log = &logs[index];
+                let color = Palette99::pick(*index).to_rgba();
 
-                context.draw_series(log.iter().map(|(time, _, transmit)| {
-                    Cross::new((*time, *transmit), 1, Palette99::pick(*index))
-                }))?;
+                context
+                    .draw_series(LineSeries::new(
+                        log.iter().map(|(time, _, transmit)| (*time, *transmit)),
+                        color,
+                    ))?
+                    .label(format!("Transmitted (Node {index})"))
+                    .legend(move |(x, y)| Cross::new((x + 10, y), 5, color.filled()));
+
+                context.draw_series(
+                    log.iter()
+                        .map(|(time, _, transmit)| Cross::new((*time, *transmit), 2, color)),
+                )?;
             }
         }
+
+        context
+            .configure_series_labels()
+            .position(SeriesLabelPosition::LowerRight)
+            .background_style(WHITE)
+            .border_style(BLACK)
+            .draw()?;
 
         Ok(())
     }
@@ -138,7 +168,7 @@ fn parse_file(path: &Path, throughput: bool) -> anyhow::Result<Vec<(f64, f64, f6
         .collect::<Result<Vec<_>, _>>()
 }
 
-fn parse_path(path: &Path) -> anyhow::Result<usize> {
+fn parse_path(path: &Path) -> anyhow::Result<(usize, &str)> {
     let name = path
         .file_name()
         .ok_or_else(|| anyhow!("Expected path with file name, but got {}", path.display()))?;
@@ -148,7 +178,7 @@ fn parse_path(path: &Path) -> anyhow::Result<usize> {
         .ok_or_else(|| anyhow!("Expected Unicode path name, but got {}", path.display()))?;
 
     name.split_once('-')
-        .and_then(|(index, _)| index.parse::<usize>().ok())
+        .and_then(|(index, name)| (index.parse::<usize>().ok().map(|index| (index, name))))
         .ok_or_else(|| {
             anyhow!(
                 "Expected file name in <INDEX>-<NAME> format, but got {}",

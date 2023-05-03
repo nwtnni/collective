@@ -1,0 +1,7 @@
+------------------------------------------------------------
+Client connecting to pc87.cloudlab.umass.edu, TCP port 5001
+TCP window size: 85.0 KByte (default)
+------------------------------------------------------------
+[  1] local 198.22.255.94 port 48694 connected with 198.22.255.98 port 5001
+[ ID] Interval       Transfer     Bandwidth
+[  1] 0.0000-10.0280 sec  1.10 GBytes   941 Mbits/sec

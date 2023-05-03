@@ -6,7 +6,7 @@ from fabric import ThreadingGroup
 
 def download(node):
     node.sudo("apt update", warn=True)
-    node.sudo("apt install libhwloc-common")
+    node.sudo("apt install -y --no-install-recommends iperf libhwloc-common")
 
     root = "https://github.com/photoszzt/mem_workloads/releases/download/v0.1-alpha-model"
     deps = "deps-install.tar.gz"
@@ -17,9 +17,6 @@ def download(node):
 
     node.run(exists(deps.strip(".tar.gz"), f"tar -xf {deps}"))
     node.run(exists(mpi.strip(".tar.gz"), f"tar -xf {mpi}"))
-
-    node.run(f"rm -f {deps}")
-    node.run(f"rm -f {mpi}")
 
     root = "https://github.com/nwtnni/collective/releases/download/0.1.0"
 

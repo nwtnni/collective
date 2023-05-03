@@ -15,8 +15,16 @@ def download(node):
     node.run(exists(deps, f"wget {root}/{deps}"))
     node.run(exists(mpi, f"wget {root}/{mpi}"))
 
-    node.run(exists(deps.strip(".tar.gz"), f"tar -xf {deps}"))
-    node.run(exists(mpi.strip(".tar.gz"), f"tar -xf {mpi}"))
+    deps_dir = deps.strip(".tar.gz")
+    mpi_dir = mpi.strip(".tar.gz")
+
+    node.run(exists(deps_dir, f"tar -xf {deps}"))
+    node.run(exists(mpi_dir, f"tar -xf {mpi}"))
+
+    node.sudo(f"rsync -rl {deps_dir}/lib/ /usr/lib/")
+    node.sudo(f"rsync -rl {mpi_dir}/lib/ /usr/lib/")
+    node.sudo(f"rsync -rl {mpi_dir}/bin/ /usr/bin/")
+    node.sudo(f"ldconfig")
 
     root = "https://github.com/nwtnni/collective/releases/download/0.1.0"
 

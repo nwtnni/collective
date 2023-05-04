@@ -203,7 +203,7 @@ fn parse_file(path: &Path, throughput: bool) -> anyhow::Result<Vec<(f64, f64, f6
         .trim()
         .split('\n')
         .map(|line| -> anyhow::Result<_> {
-            let mut iter = line.split_whitespace().skip(1);
+            let mut iter = line.split_whitespace().skip(2);
             let time = iter.next().unwrap().parse::<f64>()? / 1e9;
             let (receive, transmit) = if throughput { (2, 2) } else { (0, 2) };
             let receive = iter.nth(receive).unwrap().parse::<f64>()? / 1e9;

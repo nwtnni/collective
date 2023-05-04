@@ -1,0 +1,6 @@
+ignore: 23.739169093
+basic-linear: 129.430210712
+nonoverlapping: 92.039653269
+recursive-doubling: 28.9371471
+ring: 17.013620972
+segmented-ring: 16.947719303

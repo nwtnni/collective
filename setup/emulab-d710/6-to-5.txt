@@ -1,0 +1,7 @@
+------------------------------------------------------------
+Client connecting to pc520.emulab.net, TCP port 5001
+TCP window size: 85.0 KByte (default)
+------------------------------------------------------------
+[  1] local 155.98.38.101 port 55432 connected with 155.98.38.120 port 5001
+[ ID] Interval       Transfer     Bandwidth
+[  1] 0.0000-10.0266 sec  1.10 GBytes   941 Mbits/sec

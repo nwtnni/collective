@@ -53,9 +53,14 @@ def broadcast(nodes, interface, algorithm):
     for pcm in pcms.values():
         pcm.join()
 
+    # Parallel download
+    nodes.get(ifstat_out, local=("{host}-" + ifstat_out))
+    nodes.get(pcm_out, local=("{host}-" + pcm_out))
+
+    # Serial renames: couldn't find a way to access index from `nodes.get`.
     for index, host in enumerate(hosts):
-        subprocess.run(["scp", f"{host}:~/{ifstat_out}", f"{index}-{ifstat_out}"])
-        subprocess.run(["scp", f"{host}:~/{pcm_out}", f"{index}-{pcm_out}"])
+        subprocess.Popen(["mv", f"{host}-{ifstat_out}", f"{index}-{ifstat_out}"])
+        subprocess.Popen(["mv", f"{host}-{pcm_out}", f"{index}-{pcm_out}"])
 
 
 if __name__ == "__main__":

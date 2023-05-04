@@ -2,7 +2,6 @@ import sys
 
 from fabric import ThreadingGroup
 
-
 def download(node):
     node.sudo("apt update", warn=True)
     node.sudo("apt install -y --no-install-recommends iperf libhwloc15 pcm")
@@ -42,7 +41,13 @@ def exists(path, command):
     return f"test -e {path} || {command}"
 
 
+def keyscan(node, hosts):
+    for host in hosts:
+        node.run(f"ssh-keyscan -H {host.split('@')[1]} >> ~/.ssh/known_hosts")
+
+
 if __name__ == "__main__":
     hosts = [host.strip() for host in sys.stdin.readlines()]
     group = ThreadingGroup(*hosts)
     download(group)
+    keyscan(group[0], hosts)

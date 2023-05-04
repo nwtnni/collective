@@ -10,15 +10,19 @@ def download(node):
     root = "https://github.com/photoszzt/mem_workloads/releases/download/v0.1-alpha-model"
     deps = "deps-install.tar.gz"
     mpi = "openmpi-v5.0.x-install.tar.gz"
+    osu = "osu-micro-openmpi-install.tar.gz"
 
     node.run(exists(deps, f"wget {root}/{deps}"))
     node.run(exists(mpi, f"wget {root}/{mpi}"))
+    node.run(exists(osu, f"wget {root}/{osu}"))
 
     deps_dir = deps.strip(".tar.gz")
     mpi_dir = mpi.strip(".tar.gz")
+    osu_dir = osu.strip(".tar.gz")
 
     node.run(exists(deps_dir, f"tar -xf {deps}"))
     node.run(exists(mpi_dir, f"tar -xf {mpi}"))
+    node.run(exists(osu_dir, f"tar -xf {osu}"))
 
     node.sudo(f"rsync -rl {deps_dir}/lib/ /usr/lib/")
     node.sudo(f"rsync -rl {mpi_dir}/lib/ /usr/lib/")

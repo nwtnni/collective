@@ -53,7 +53,7 @@ def run(hosts, nodes, interface, benchmark, algorithm):
         "--mca btl self,tcp",
         f"--mca btl_tcp_if_include {interface}",
         "-H",
-        ",".join([host.split('@')[1] for host in hosts]),
+        ",".join(hosts),
         "--mca coll_tuned_use_dynamic_rules 1",
         f"--mca coll_tuned_{'bcast' if benchmark == 'broadcast' else benchmark}_algorithm {algorithm}",
         benchmark,
@@ -78,12 +78,13 @@ def run(hosts, nodes, interface, benchmark, algorithm):
 
 
 @click.command()
+@click.option("-u", "--user", required=True)
 @click.option("-i", "--interface", required=True)
 @click.option("-b", "--benchmark")
 @click.option("-a", "--algorithm")
-def main(interface, benchmark, algorithm):
+def main(user, interface, benchmark, algorithm):
     hosts = [host.strip() for host in sys.stdin.readlines()]
-    nodes = ThreadingGroup(*hosts, forward_agent=True)
+    nodes = ThreadingGroup(*hosts, user=user, forward_agent=True)
 
     assert benchmark in ALGORITHMS.keys()
 

@@ -7,10 +7,18 @@ from fabric import ThreadingGroup
 
 
 if __name__ == "__main__":
+    interface = None
+
+    try:
+        interface = sys.argv[1]
+    except IndexError:
+        print("Usage: python mpi.py <NETWORK_INTERFACE>")
+        exit(1)
+
     hosts = [host.strip() for host in sys.stdin.readlines()]
     nodes = [Connection(host, forward_agent=True) for host in hosts]
 
-    ifstats = [node.run("~/ifstat -I eno1 -i 20ms -d 15s > ifstat-broadcast.txt", asynchronous=True) for node in nodes]
+    ifstats = [node.run(f"~/ifstat -I {interface} -i 20ms -d 15s > ifstat-broadcast.txt", asynchronous=True) for node in nodes]
     pcms = [node.sudo("timeout 15s pcm-memory -nc -s -csv=pcm-memory-broadcast.txt 0.02", asynchronous=True, warn=True) for node in nodes]
 
     time.sleep(1.0)
@@ -23,7 +31,7 @@ if __name__ == "__main__":
         "-x OPAL_PREFIX",
         "--map-by ppr:1:node",
         "--mca btl self,tcp",
-        "--mca btl_tcp_if_include eno1",
+        f"--mca btl_tcp_if_include {interface}",
         "-H",
         ",".join([host.split('@')[1] for host in hosts]),
         # "--mca coll_tuned_use_dynamic_rules 1",

@@ -1,5 +1,6 @@
 import sys
 
+import click
 from fabric import ThreadingGroup
 
 def download(node):
@@ -43,11 +44,17 @@ def exists(path, command):
 
 def keyscan(node, hosts):
     for host in hosts:
-        node.run(f"ssh-keyscan -H {host.split('@')[1]} >> ~/.ssh/known_hosts")
+        node.run(f"ssh-keyscan -H {host} >> ~/.ssh/known_hosts")
+
+
+@click.command()
+@click.option("-u", "--user", required=True)
+def main(user):
+    hosts = [host.strip() for host in sys.stdin.readlines()]
+    group = ThreadingGroup(*hosts, user=user)
+    download(group)
+    keyscan(group[0], hosts)
 
 
 if __name__ == "__main__":
-    hosts = [host.strip() for host in sys.stdin.readlines()]
-    group = ThreadingGroup(*hosts)
-    download(group)
-    keyscan(group[0], hosts)
+    main()

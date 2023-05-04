@@ -1,0 +1,10 @@
+default: 63.84908882
+basic-linear: 63.849367888
+chain: 36.476438209
+pipeline: 9.107744556
+split-binary-tree: 18.254451222
+binary-tree: 18.217241976
+binomial-tree: 27.343746369
+knomial-tree: 36.473904352
+scatter-allgather: 23.969964934
+scatter-allgather-ring: 16.086914847

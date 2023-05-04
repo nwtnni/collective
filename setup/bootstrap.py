@@ -1,12 +1,11 @@
 import sys
 
-from fabric import Connection
 from fabric import ThreadingGroup
 
 
 def download(node):
     node.sudo("apt update", warn=True)
-    node.sudo("apt install -y --no-install-recommends iperf libhwloc15")
+    node.sudo("apt install -y --no-install-recommends iperf libhwloc15 pcm")
 
     root = "https://github.com/photoszzt/mem_workloads/releases/download/v0.1-alpha-model"
     deps = "deps-install.tar.gz"
@@ -30,9 +29,13 @@ def download(node):
 
     node.run(exists("allreduce", f"wget {root}/allreduce"))
     node.run(exists("broadcast", f"wget {root}/broadcast"))
+    node.run(exists("ifstat", f"wget {root}/ifstat"))
 
     node.run(f"chmod 755 allreduce")
     node.run(f"chmod 755 broadcast")
+    node.run(f"chmod 755 ifstat")
+
+    node.sudo("modprobe msr")
 
 
 def exists(path, command):

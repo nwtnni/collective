@@ -6,7 +6,7 @@ from fabric import ThreadingGroup
 
 def download(node):
     node.sudo("apt update", warn=True)
-    node.sudo("apt install -y --no-install-recommends iperf libhwloc-common")
+    node.sudo("apt install -y --no-install-recommends iperf libhwloc15")
 
     root = "https://github.com/photoszzt/mem_workloads/releases/download/v0.1-alpha-model"
     deps = "deps-install.tar.gz"

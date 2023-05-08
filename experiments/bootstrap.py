@@ -1,3 +1,4 @@
+import os
 import sys
 
 import click
@@ -51,13 +52,39 @@ def keyscan(node, hosts):
         node.run(f"ssh-keyscan -H {host} >> ~/.ssh/known_hosts")
 
 
+# https://github.com/vtess/Pond/blob/master/cxl-global.sh
+def standardize(node, cores):
+    # Disable non-maskable interrupt (NMI) watchdog
+    # See: https://kernel.googlesource.com/pub/scm/linux/kernel/git/arm64/linux/+/v3.1-rc3/Documentation/nmi_watchdog.txt
+    node.sudo("echo 0 | sudo tee /proc/sys/kernel/nmi_watchdog >/dev/null 2>&1")
+
+    system = "/sys/devices/system"
+
+    # Enable all cores
+    node.sudo(f"echo 1 | sudo tee {system}/cpu/cpu*/online >/dev/null 2>&1")
+
+    # Enable performance mode
+    # See: https://wiki.archlinux.org/title/CPU_frequency_scaling
+    node.sudo(f"echo performance | sudo tee {system}/cpu/cpu*/cpufreq/scaling_governor >/dev/null 2>&1")
+
+    # Disable turbo
+    # See: https://wiki.archlinux.org/title/CPU_frequency_scaling
+    node.sudo(f"echo 1 | sudo tee {system}/cpu/intel_pstate/no_turbo >/dev/null 2>&1")
+
+    # Disable all but two cores
+    if cores > 2:
+        node.sudo(f"echo 0 | sudo tee {system}/cpu/cpu{{2..{cores - 1}}}/online >/dev/null 2>&1")
+
+
 @click.command()
 @click.option("-u", "--user", required=True)
-def main(user):
+@click.option("-c", "--cores", required=True, type=int)
+def main(user, cores):
     hosts = [host.strip() for host in sys.stdin.readlines()]
     group = ThreadingGroup(*hosts, user=user)
     download(group)
     keyscan(group[0], hosts)
+    standardize(group, cores)
 
 
 if __name__ == "__main__":

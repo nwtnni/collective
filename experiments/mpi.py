@@ -31,7 +31,7 @@ ALGORITHMS = {
 }
 
 
-def run(hosts, nodes, interface, benchmark, algorithm):
+def run(hosts, nodes, interface, benchmark, algorithm, path):
     print(f"Running {benchmark} {ALGORITHMS[benchmark][algorithm]}...")
 
     nodes.sudo(f"ethtool -C {interface} stats-block-usecs 100000")
@@ -56,7 +56,7 @@ def run(hosts, nodes, interface, benchmark, algorithm):
         ",".join(hosts),
         "--mca coll_tuned_use_dynamic_rules 1",
         f"--mca coll_tuned_{'bcast' if benchmark == 'broadcast' else benchmark}_algorithm {algorithm}",
-        benchmark,
+        path,
         "$((2**30))",
     ])
 
@@ -82,7 +82,9 @@ def run(hosts, nodes, interface, benchmark, algorithm):
 @click.option("-i", "--interface", required=True)
 @click.option("-b", "--benchmark")
 @click.option("-a", "--algorithm")
-def main(user, interface, benchmark, algorithm):
+@click.option("-p", "--path")
+def main(user, interface, benchmark, algorithm, path):
+    path = path or benchmark
     hosts = [host.strip() for host in sys.stdin.readlines()]
     nodes = ThreadingGroup(*hosts, user=user, forward_agent=True)
 
@@ -103,7 +105,7 @@ def main(user, interface, benchmark, algorithm):
 
     for benchmark in [benchmark] if benchmark is not None else ALGORITHMS.keys():
         for algorithm in range(len(ALGORITHMS[benchmark])):
-            run(hosts, nodes, interface, benchmark, algorithm)
+            run(hosts, nodes, interface, benchmark, algorithm, path)
 
 
 if __name__ == "__main__":

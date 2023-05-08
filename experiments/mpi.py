@@ -31,7 +31,7 @@ ALGORITHMS = {
 }
 
 
-def run(hosts, nodes, interface, benchmark, algorithm, path):
+def run_basic(hosts, nodes, interface, benchmark, algorithm):
     print(f"Running {benchmark} {ALGORITHMS[benchmark][algorithm]}...")
 
     nodes.sudo(f"ethtool -C {interface} stats-block-usecs 100000")
@@ -44,23 +44,7 @@ def run(hosts, nodes, interface, benchmark, algorithm, path):
 
     time.sleep(5.0)
 
-    # https://github.com/JiaweiZhuang/aws-mpi-benchmark/tree/master
-    command = " ".join([
-        "OPAL_PREFIX=/users/nwtnni/openmpi-v5.0.x-install",
-        "mpirun",
-        "-x OPAL_PREFIX",
-        "--map-by ppr:1:node",
-        "--mca btl self,tcp",
-        f"--mca btl_tcp_if_include {interface}",
-        "-H",
-        ",".join(hosts),
-        "--mca coll_tuned_use_dynamic_rules 1",
-        f"--mca coll_tuned_{'bcast' if benchmark == 'broadcast' else benchmark}_algorithm {algorithm}",
-        path,
-        "$((2**30))",
-    ])
-
-    nodes[0].run(command)
+    nodes[0].run(mpirun(hosts, interface, benchmark, algorithm, benchmark) + "$((2**30))")
 
     for ifstat in ifstats.values():
         ifstat.join()
@@ -77,13 +61,40 @@ def run(hosts, nodes, interface, benchmark, algorithm, path):
         subprocess.Popen(["mv", f"{host}-{pcm_out}", f"{index}-{pcm_out}"])
 
 
+def run_osu(hosts, nodes, interface, benchmark, algorithm, path):
+    print(f"Running {benchmark} {ALGORITHMS[benchmark][algorithm]} ({path})...")
+
+    out = f"osu-{benchmark}-{ALGORITHMS[benchmark][algorithm]}.txt"
+
+    nodes[0].run(mpirun(hosts, interface, benchmark, algorithm, path + " -f") + f" | tee {out}")
+    nodes[0].get(out)
+
+
+# https://github.com/JiaweiZhuang/aws-mpi-benchmark/tree/master
+def mpirun(hosts, interface, benchmark, algorithm, path):
+    return " ".join([
+        "OPAL_PREFIX=/users/nwtnni/openmpi-v5.0.x-install",
+        "mpirun",
+        "-x OPAL_PREFIX",
+        "--map-by ppr:1:node",
+        "--mca btl self,tcp",
+        f"--mca btl_tcp_if_include {interface}",
+        "-H",
+        ",".join(hosts),
+        "--mca coll_tuned_use_dynamic_rules 1",
+        f"--mca coll_tuned_{'bcast' if benchmark == 'broadcast' else benchmark}_algorithm {algorithm}",
+        path,
+    ])
+
+
 @click.command()
 @click.option("-u", "--user", required=True)
 @click.option("-i", "--interface", required=True)
 @click.option("-b", "--benchmark")
 @click.option("-a", "--algorithm")
 @click.option("-p", "--path")
-def main(user, interface, benchmark, algorithm, path):
+@click.option("-o", "--osu", is_flag=True)
+def main(user, interface, benchmark, algorithm, path, osu):
     path = path or benchmark
     hosts = [host.strip() for host in sys.stdin.readlines()]
     nodes = ThreadingGroup(*hosts, user=user, forward_agent=True)
@@ -100,12 +111,18 @@ def main(user, interface, benchmark, algorithm, path):
             assert algorithm in ALGORITHMS[benchmark]
             algorithm = ALGORITHMS[benchmark].index(algorithm)
 
-        run(hosts, nodes, interface, benchmark, algorithm)
+        if osu:
+            run_osu(hosts, nodes, interface, benchmark, algorithm, path)
+        else:
+            run_basic(hosts, nodes, interface, benchmark, algorithm)
         return
 
     for benchmark in [benchmark] if benchmark is not None else ALGORITHMS.keys():
         for algorithm in range(len(ALGORITHMS[benchmark])):
-            run(hosts, nodes, interface, benchmark, algorithm, path)
+            if osu:
+                run_osu(hosts, nodes, interface, benchmark, algorithm, path)
+            else:
+                run_basic(hosts, nodes, interface, benchmark, algorithm)
 
 
 if __name__ == "__main__":

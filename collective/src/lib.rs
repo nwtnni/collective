@@ -1,7 +1,42 @@
 #![allow(clippy::missing_safety_doc)]
 #![allow(non_camel_case_types)]
+#![allow(non_upper_case_globals)]
 
 use std::ffi;
+
+use once_cell::sync::Lazy;
+
+static LIBMPI: Lazy<libloading::Library> =
+    Lazy::new(|| unsafe { libloading::Library::new("libmpi.so").unwrap() });
+
+static _MPI_Init_thread: Lazy<
+    libloading::Symbol<
+        'static,
+        unsafe extern "C" fn(
+            *const ffi::c_int,
+            *const *const *const ffi::c_char,
+            ffi::c_int,
+            *const ffi::c_int,
+        ),
+    >,
+> = Lazy::new(|| unsafe { LIBMPI.get(b"MPI_Init_thread\0").unwrap() });
+
+static _MPI_Bcast: Lazy<
+    libloading::Symbol<
+        'static,
+        unsafe extern "C" fn(
+            *const ffi::c_void,
+            ffi::c_int,
+            mpi::ffi::MPI_Datatype,
+            ffi::c_int,
+            mpi::ffi::MPI_Comm,
+        ) -> ffi::c_int,
+    >,
+> = Lazy::new(|| unsafe { LIBMPI.get(b"MPI_Bcast\0").unwrap() });
+
+static _MPI_Barrier: Lazy<
+    libloading::Symbol<'static, unsafe extern "C" fn(mpi::ffi::MPI_Comm) -> ffi::c_int>,
+> = Lazy::new(|| unsafe { LIBMPI.get(b"MPI_Barrier\0").unwrap() });
 
 #[no_mangle]
 pub unsafe extern "C" fn MPI_Init_thread(
@@ -15,56 +50,27 @@ pub unsafe extern "C" fn MPI_Init_thread(
         argc, argv, required, provided,
     );
 
-    let library = libloading::Library::new("libmpi.so").unwrap();
-    let mpi_init_thread = library
-        .get::<unsafe extern "C" fn(
-            *const ffi::c_int,
-            *const *const *const ffi::c_char,
-            ffi::c_int,
-            *const ffi::c_int,
-        )>(b"MPI_Init_thread\0")
-        .unwrap();
-
-    mpi_init_thread(argc, argv, required, provided)
+    _MPI_Init_thread(argc, argv, required, provided)
 }
-
-type MPI_Datatype = ffi::c_int;
-type MPI_Comm = ffi::c_int;
 
 #[no_mangle]
 pub unsafe extern "C" fn MPI_Bcast(
     buffer: *const ffi::c_void,
     count: ffi::c_int,
-    datatype: MPI_Datatype,
+    datatype: mpi::ffi::MPI_Datatype,
     root: ffi::c_int,
-    comm: MPI_Comm,
+    comm: mpi::ffi::MPI_Comm,
 ) -> ffi::c_int {
     println!(
         "Called MPI_Bcast with arguments: {buffer:?} {count:?} {datatype:?} {root:?} {comm:?}",
     );
 
-    let library = libloading::Library::new("libmpi.so").unwrap();
-    let mpi_bcast = library
-        .get::<unsafe extern "C" fn(
-            *const ffi::c_void,
-            ffi::c_int,
-            MPI_Datatype,
-            ffi::c_int,
-            MPI_Comm,
-        ) -> ffi::c_int>(b"MPI_Bcast\0")
-        .unwrap();
-
-    mpi_bcast(buffer, count, datatype, root, comm)
+    _MPI_Bcast(buffer, count, datatype, root, comm)
 }
 
 #[no_mangle]
-pub unsafe extern "C" fn MPI_Barrier(comm: MPI_Comm) -> ffi::c_int {
+pub unsafe extern "C" fn MPI_Barrier(comm: mpi::ffi::MPI_Comm) -> ffi::c_int {
     println!("Called MPI_Barrier with arguments: {comm:?}");
 
-    let library = libloading::Library::new("libmpi.so").unwrap();
-    let mpi_barrier = library
-        .get::<unsafe extern "C" fn(MPI_Comm) -> ffi::c_int>(b"MPI_Barrier\0")
-        .unwrap();
-
-    mpi_barrier(comm)
+    _MPI_Barrier(comm)
 }

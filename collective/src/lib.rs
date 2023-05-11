@@ -39,7 +39,8 @@ static PCI_FILE: Lazy<fs::File> = Lazy::new(|| initialize_file().unwrap());
 static PCI_MAP: Lazy<Mutex<MmapMut>> = Lazy::new(|| initialize_map().map(Mutex::new).unwrap());
 
 const CACHE_LINE: usize = 64;
-static BROADCAST: AtomicU8 = AtomicU8::new(0);
+
+static EPOCH: AtomicU8 = AtomicU8::new(0);
 
 struct Communicator(mpi::ffi::MPI_Comm);
 
@@ -59,11 +60,6 @@ pub unsafe extern "C" fn MPI_Init_thread(
     required: ffi::c_int,
     provided: *const ffi::c_int,
 ) {
-    println!(
-        "Called MPI_Init_thread with arguments: {:?} {:?} {:?} {:?}",
-        argc, argv, required, provided,
-    );
-
     _MPI_Init_thread(argc, argv, required, provided)
 }
 
@@ -71,14 +67,10 @@ pub unsafe extern "C" fn MPI_Init_thread(
 pub unsafe extern "C" fn MPI_Bcast(
     buffer: *mut ffi::c_void,
     count: ffi::c_int,
-    datatype: mpi::ffi::MPI_Datatype,
+    _: mpi::ffi::MPI_Datatype,
     root: ffi::c_int,
     comm: mpi::ffi::MPI_Comm,
 ) -> ffi::c_int {
-    println!(
-        "Called MPI_Bcast with arguments: {buffer:?} {count:?} {datatype:?} {root:?} {comm:?}",
-    );
-
     let comm = Communicator(comm);
 
     if comm.size() == 1 {
@@ -86,12 +78,12 @@ pub unsafe extern "C" fn MPI_Bcast(
     }
 
     if comm.rank() == root {
-        println!("Called MPI_Bcast from root: {}", comm.rank());
+        static EPOCH_ROOT: Once = Once::new();
 
-        static UPDATE: Once = Once::new();
-
-        UPDATE.call_once(|| {
-            BROADCAST.fetch_add(1, Ordering::AcqRel);
+        // `fetch_add` returns the previous value, so we need to update the root
+        // epoch exactly once for it to be offset from other nodes.
+        EPOCH_ROOT.call_once(|| {
+            EPOCH.fetch_add(1, Ordering::AcqRel);
         });
 
         unsafe {
@@ -104,19 +96,17 @@ pub unsafe extern "C" fn MPI_Bcast(
             let flag = &*shared.as_ptr().cast::<AtomicU8>();
 
             // Update broadcast epoch
-            flag.store(BROADCAST.fetch_add(1, Ordering::AcqRel), Ordering::Release);
+            flag.store(EPOCH.fetch_add(1, Ordering::AcqRel), Ordering::Release);
         }
     } else {
-        println!("Called MPI_Bcast from peer: {}", comm.rank());
-
         unsafe {
             let shared = PCI_MAP.lock().unwrap();
 
             let flag = &*shared.as_ptr().cast::<AtomicU8>();
 
             // Spin until broadcast epoch is updated
-            while flag.load(Ordering::Acquire) == BROADCAST.load(Ordering::Acquire) {}
-            BROADCAST.fetch_add(1, Ordering::AcqRel);
+            while flag.load(Ordering::Acquire) == EPOCH.load(Ordering::Acquire) {}
+            EPOCH.fetch_add(1, Ordering::AcqRel);
 
             let slice = std::slice::from_raw_parts_mut(buffer as *mut u8, count as usize);
             slice.copy_from_slice(&shared[CACHE_LINE..][..count as usize]);
@@ -128,8 +118,6 @@ pub unsafe extern "C" fn MPI_Bcast(
 
 #[no_mangle]
 pub unsafe extern "C" fn MPI_Barrier(comm: mpi::ffi::MPI_Comm) -> ffi::c_int {
-    println!("Called MPI_Barrier with arguments: {comm:?}");
-
     _MPI_Barrier(comm)
 }
 

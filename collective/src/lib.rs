@@ -77,6 +77,10 @@ pub unsafe extern "C" fn MPI_Bcast(
 
     let comm = Communicator(comm);
 
+    if comm.size() == 1 {
+        return mpi::ffi::MPI_SUCCESS as ffi::c_int;
+    }
+
     if comm.rank() == root {
         println!("Called MPI_Bcast from root: {}", comm.rank());
 

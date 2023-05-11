@@ -86,7 +86,10 @@ pub unsafe extern "C" fn MPI_Bcast(
 
         unsafe {
             let slice = std::slice::from_raw_parts(buffer as *const u8, count as usize);
-            PCI_MAP.lock().unwrap().copy_from_slice(slice);
+            PCI_MAP.lock().unwrap()[..count as usize].copy_from_slice(slice);
+
+            // FIXME: implement proper synchronization through shared memory
+            thread::sleep(time::Duration::from_secs(5));
         }
     } else {
         println!("Called MPI_Bcast from peer: {}", comm.rank());
@@ -96,7 +99,7 @@ pub unsafe extern "C" fn MPI_Bcast(
             thread::sleep(time::Duration::from_secs(5));
 
             let slice = std::slice::from_raw_parts_mut(buffer as *mut u8, count as usize);
-            slice.copy_from_slice(&PCI_MAP.lock().unwrap());
+            slice.copy_from_slice(&PCI_MAP.lock().unwrap()[..count as usize]);
         }
     }
 

@@ -5,10 +5,9 @@
 use std::ffi;
 use std::fs;
 use std::os::unix::fs::OpenOptionsExt as _;
-use std::sync::atomic::AtomicU8;
+use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 use std::sync::Mutex;
-use std::sync::Once;
 
 use anyhow::anyhow;
 use anyhow::Context as _;
@@ -40,7 +39,7 @@ static PCI_MAP: Lazy<Mutex<MmapMut>> = Lazy::new(|| initialize_map().map(Mutex::
 
 const CACHE_LINE: usize = 64;
 
-static EPOCH: AtomicU8 = AtomicU8::new(0);
+static EPOCH: AtomicU64 = AtomicU64::new(0);
 
 struct Communicator(mpi::ffi::MPI_Comm);
 
@@ -77,42 +76,45 @@ pub unsafe extern "C" fn MPI_Bcast(
         return mpi::ffi::MPI_SUCCESS as ffi::c_int;
     }
 
+    let epoch_before = EPOCH.load(Ordering::Acquire);
+    let epoch_after = epoch_before + comm.size() as u64;
+
     if comm.rank() == root {
-        static EPOCH_ROOT: Once = Once::new();
-
-        // `fetch_add` returns the previous value, so we need to update the root
-        // epoch exactly once for it to be offset from other nodes.
-        EPOCH_ROOT.call_once(|| {
-            EPOCH.fetch_add(1, Ordering::AcqRel);
-        });
-
         unsafe {
-            let slice = std::slice::from_raw_parts(buffer as *const u8, count as usize);
             let mut shared = PCI_MAP.lock().unwrap();
 
-            shared[CACHE_LINE..][..count as usize].copy_from_slice(slice);
+            let local = std::slice::from_raw_parts(buffer as *const u8, count as usize);
+
+            shared[CACHE_LINE..][..count as usize].copy_from_slice(local);
 
             // https://doc.rust-lang.org/src/core/sync/atomic.rs.html#2090-2092
-            let flag = &*shared.as_ptr().cast::<AtomicU8>();
+            let epoch = &*shared.as_ptr().cast::<AtomicU64>();
 
-            // Update broadcast epoch
-            flag.store(EPOCH.fetch_add(1, Ordering::AcqRel), Ordering::Release);
+            // Kick off broadcast
+            epoch.fetch_add(1, Ordering::AcqRel);
+
+            // Spin waiting for everyone to read
+            while epoch.load(Ordering::Acquire) < epoch_after {}
         }
     } else {
         unsafe {
             let shared = PCI_MAP.lock().unwrap();
 
-            let flag = &*shared.as_ptr().cast::<AtomicU8>();
+            // https://doc.rust-lang.org/src/core/sync/atomic.rs.html#2090-2092
+            let epoch = &*shared.as_ptr().cast::<AtomicU64>();
 
-            // Spin until broadcast epoch is updated
-            while flag.load(Ordering::Acquire) == EPOCH.load(Ordering::Acquire) {}
-            EPOCH.fetch_add(1, Ordering::AcqRel);
+            // Spin until broadcast starts
+            while epoch.load(Ordering::Acquire) == epoch_before {}
 
-            let slice = std::slice::from_raw_parts_mut(buffer as *mut u8, count as usize);
-            slice.copy_from_slice(&shared[CACHE_LINE..][..count as usize]);
+            let local = std::slice::from_raw_parts_mut(buffer as *mut u8, count as usize);
+            local.copy_from_slice(&shared[CACHE_LINE..][..count as usize]);
+
+            // Update broadcaster
+            epoch.fetch_add(1, Ordering::AcqRel);
         }
     }
 
+    EPOCH.store(epoch_after, Ordering::Release);
     mpi::ffi::MPI_SUCCESS as ffi::c_int
 }
 

@@ -5,9 +5,10 @@
 use std::ffi;
 use std::fs;
 use std::os::unix::fs::OpenOptionsExt as _;
+use std::sync::atomic::AtomicU8;
+use std::sync::atomic::Ordering;
 use std::sync::Mutex;
-use std::thread;
-use std::time;
+use std::sync::Once;
 
 use anyhow::anyhow;
 use anyhow::Context as _;
@@ -36,6 +37,9 @@ static _MPI_Barrier: Lazy<
 
 static PCI_FILE: Lazy<fs::File> = Lazy::new(|| initialize_file().unwrap());
 static PCI_MAP: Lazy<Mutex<MmapMut>> = Lazy::new(|| initialize_map().map(Mutex::new).unwrap());
+
+const CACHE_LINE: usize = 64;
+static BROADCAST: AtomicU8 = AtomicU8::new(0);
 
 struct Communicator(mpi::ffi::MPI_Comm);
 
@@ -84,22 +88,38 @@ pub unsafe extern "C" fn MPI_Bcast(
     if comm.rank() == root {
         println!("Called MPI_Bcast from root: {}", comm.rank());
 
+        static UPDATE: Once = Once::new();
+
+        UPDATE.call_once(|| {
+            BROADCAST.fetch_add(1, Ordering::AcqRel);
+        });
+
         unsafe {
             let slice = std::slice::from_raw_parts(buffer as *const u8, count as usize);
-            PCI_MAP.lock().unwrap()[..count as usize].copy_from_slice(slice);
+            let mut shared = PCI_MAP.lock().unwrap();
 
-            // FIXME: implement proper synchronization through shared memory
-            thread::sleep(time::Duration::from_secs(5));
+            shared[CACHE_LINE..][..count as usize].copy_from_slice(slice);
+
+            // https://doc.rust-lang.org/src/core/sync/atomic.rs.html#2090-2092
+            let flag = &*shared.as_ptr().cast::<AtomicU8>();
+
+            // Update broadcast epoch
+            flag.store(BROADCAST.fetch_add(1, Ordering::AcqRel), Ordering::Release);
         }
     } else {
         println!("Called MPI_Bcast from peer: {}", comm.rank());
 
         unsafe {
-            // FIXME: implement proper synchronization through shared memory
-            thread::sleep(time::Duration::from_secs(5));
+            let shared = PCI_MAP.lock().unwrap();
+
+            let flag = &*shared.as_ptr().cast::<AtomicU8>();
+
+            // Spin until broadcast epoch is updated
+            while flag.load(Ordering::Acquire) == BROADCAST.load(Ordering::Acquire) {}
+            BROADCAST.fetch_add(1, Ordering::AcqRel);
 
             let slice = std::slice::from_raw_parts_mut(buffer as *mut u8, count as usize);
-            slice.copy_from_slice(&PCI_MAP.lock().unwrap()[..count as usize]);
+            slice.copy_from_slice(&shared[CACHE_LINE..][..count as usize]);
         }
     }
 

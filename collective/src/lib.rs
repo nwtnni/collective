@@ -4,6 +4,7 @@
 
 use std::ffi;
 use std::fs;
+use std::mem;
 use std::os::unix::fs::OpenOptionsExt as _;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
@@ -15,24 +16,21 @@ use memmap2::MmapMut;
 use mpi::traits::Communicator as _;
 use once_cell::sync::Lazy;
 
-static LIBMPI: Lazy<libloading::Library> =
-    Lazy::new(|| unsafe { libloading::Library::new("libmpi.so").unwrap() });
-
 static _MPI_Init_thread: Lazy<
-    libloading::Symbol<
-        'static,
-        unsafe extern "C" fn(
-            *const ffi::c_int,
-            *const *const *const ffi::c_char,
-            ffi::c_int,
-            *const ffi::c_int,
-        ),
-    >,
-> = Lazy::new(|| unsafe { LIBMPI.get(b"MPI_Init_thread\0").unwrap() });
-
-static _MPI_Barrier: Lazy<
-    libloading::Symbol<'static, unsafe extern "C" fn(mpi::ffi::MPI_Comm) -> ffi::c_int>,
-> = Lazy::new(|| unsafe { LIBMPI.get(b"MPI_Barrier\0").unwrap() });
+    unsafe extern "C" fn(
+        *const ffi::c_int,
+        *const *const *const ffi::c_char,
+        ffi::c_int,
+        *const ffi::c_int,
+    ),
+> = Lazy::new(|| unsafe {
+    mem::transmute(libc::dlsym(
+        libc::RTLD_NEXT,
+        ffi::CStr::from_bytes_with_nul(b"MPI_Init_thread\0")
+            .unwrap()
+            .as_ptr(),
+    ))
+});
 
 static PCI_FILE: Lazy<fs::File> = Lazy::new(|| initialize_file().unwrap());
 static PCI_MAP: Lazy<Mutex<MmapMut>> = Lazy::new(|| initialize_map().map(Mutex::new).unwrap());
@@ -59,6 +57,8 @@ pub unsafe extern "C" fn MPI_Init_thread(
     required: ffi::c_int,
     provided: *const ffi::c_int,
 ) {
+    Lazy::force(&PCI_FILE);
+    Lazy::force(&PCI_MAP);
     _MPI_Init_thread(argc, argv, required, provided)
 }
 
@@ -116,11 +116,6 @@ pub unsafe extern "C" fn MPI_Bcast(
 
     EPOCH.store(epoch_after, Ordering::Release);
     mpi::ffi::MPI_SUCCESS as ffi::c_int
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn MPI_Barrier(comm: mpi::ffi::MPI_Comm) -> ffi::c_int {
-    _MPI_Barrier(comm)
 }
 
 fn initialize_file() -> anyhow::Result<fs::File> {

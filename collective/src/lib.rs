@@ -2,6 +2,7 @@
 #![allow(non_camel_case_types)]
 #![allow(non_upper_case_globals)]
 
+use std::env;
 use std::ffi;
 use std::fs;
 use std::mem;
@@ -119,7 +120,8 @@ pub unsafe extern "C" fn MPI_Bcast(
 }
 
 fn initialize_file() -> anyhow::Result<fs::File> {
-    let path = fs::read_to_string("./pci.txt").context("Failed to read ./pci.txt")?;
+    let path = env::var("COLLECTIVE_PCI_PATH")
+        .context("Missing COLLECTIVE_PCI_PATH environment variable")?;
     let path = path.trim();
 
     fs::File::options()

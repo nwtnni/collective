@@ -119,6 +119,20 @@ pub unsafe extern "C" fn MPI_Bcast(
     mpi::ffi::MPI_SUCCESS as ffi::c_int
 }
 
+#[no_mangle]
+pub unsafe extern "C" fn MPI_Allreduce(
+    buffer_send: *const ffi::c_void,
+    buffer_receive: *mut ffi::c_void,
+    count: ffi::c_int,
+    _: mpi::ffi::MPI_Datatype,
+    op: mpi::ffi::MPI_Op,
+    comm: mpi::ffi::MPI_Comm,
+) -> ffi::c_int {
+    let _comm = Communicator(comm);
+    eprintln!("MPI_Allreduce called with arguments: {buffer_send:?} {buffer_receive:?} {count:?} {op:?} {comm:?}");
+    mpi::ffi::MPI_SUCCESS as ffi::c_int
+}
+
 fn initialize_file() -> anyhow::Result<fs::File> {
     let path = env::var("COLLECTIVE_PCI_PATH")
         .context("Missing COLLECTIVE_PCI_PATH environment variable")?;

@@ -2,6 +2,7 @@
 #![allow(non_camel_case_types)]
 #![allow(non_upper_case_globals)]
 
+use std::cmp;
 use std::env;
 use std::ffi;
 use std::fs;
@@ -28,6 +29,15 @@ static _MPI_Init_thread: Lazy<
     mem::transmute(libc::dlsym(
         libc::RTLD_NEXT,
         ffi::CStr::from_bytes_with_nul(b"MPI_Init_thread\0")
+            .unwrap()
+            .as_ptr(),
+    ))
+});
+
+static _MPI_Barrier: Lazy<unsafe extern "C" fn(mpi::ffi::MPI_Comm)> = Lazy::new(|| unsafe {
+    mem::transmute(libc::dlsym(
+        libc::RTLD_NEXT,
+        ffi::CStr::from_bytes_with_nul(b"MPI_Barrier\0")
             .unwrap()
             .as_ptr(),
     ))
@@ -125,16 +135,13 @@ pub unsafe extern "C" fn MPI_Allreduce(
     buffer_send: *const ffi::c_void,
     buffer_receive: *mut ffi::c_void,
     count: ffi::c_int,
-    datatype: mpi::ffi::MPI_Datatype,
-    op: mpi::ffi::MPI_Op,
+    _: mpi::ffi::MPI_Datatype,
+    _: mpi::ffi::MPI_Op,
     comm: mpi::ffi::MPI_Comm,
 ) -> ffi::c_int {
-    assert_eq!(datatype, mpi::ffi::RSMPI_FLOAT);
-    assert_eq!(op, mpi::ffi::RSMPI_SUM);
-
+    let comm = Communicator(comm);
     let buffer_send = std::slice::from_raw_parts(buffer_send as *const f32, count as usize);
     let buffer_receive = std::slice::from_raw_parts_mut(buffer_receive as *mut f32, count as usize);
-    let comm = Communicator(comm);
 
     // | Region 0 Lock (64B)   |
     // | Region 1 Lock (64B)   |
@@ -151,26 +158,34 @@ pub unsafe extern "C" fn MPI_Allreduce(
     // | Region 24 (4KiB)      | <- P3
     // | ...                   |
     let region_size = PAGE_SIZE;
-    let total_size = count as usize * mem::size_of::<f32>();
-    let region_count = (total_size + region_size - 1) / region_size;
+    let data_size = count as usize * mem::size_of::<f32>();
+    let region_count = (data_size + region_size - 1) / region_size;
     let region_offset = comm.rank() as usize * (region_count / comm.size() as usize);
-    let header_size = region_count * CACHE_LINE_SIZE;
+    let metadata_size = (region_count + 2) * CACHE_LINE_SIZE;
 
     let mut pci_map = PCI_MAP.lock().unwrap();
 
+    // FIXME: coordinate zeroing through shared memory
+    if comm.rank() == 0 {
+        pci_map.fill(0);
+    }
+    _MPI_Barrier(comm.0);
+
     // Partition shared memory into disjoint areas
     let (region_locks, broadcast_ready, broadcast_start, buffer_shared) = {
-        let (header, buffer) = pci_map.split_at_mut(header_size);
-        let (regions, broadcasts) = header.split_at(region_count * CACHE_LINE_SIZE);
-        let (ready, start) = broadcasts.split_at(CACHE_LINE_SIZE);
+        let (metadata, data) = pci_map.split_at_mut(metadata_size);
+        let (locks, barrier) = metadata.split_at_mut(region_count * CACHE_LINE_SIZE);
+        let (ready, start) = barrier.split_at_mut(CACHE_LINE_SIZE);
+
         let ready = &*ready.as_ptr().cast::<AtomicU64>();
         let start = &*start.as_ptr().cast::<AtomicU64>();
-        (regions, ready, start, buffer)
-    };
 
-    let (prefix, buffer_shared, suffix) = buffer_shared[..total_size].align_to_mut::<f32>();
-    assert!(prefix.is_empty());
-    assert!(suffix.is_empty());
+        let (prefix, data, suffix) = data[..data_size].align_to_mut::<f32>();
+        assert!(prefix.is_empty());
+        assert!(suffix.is_empty());
+
+        (locks, ready, start, data)
+    };
 
     // Start at different offsets
     for region in (0..region_count)
@@ -178,15 +193,18 @@ pub unsafe extern "C" fn MPI_Allreduce(
         .skip(region_offset)
         .take(region_count)
     {
-        let address = region * region_size / mem::size_of::<f32>();
-        let size = region_size / mem::size_of::<f32>();
+        let offset = region * region_size / mem::size_of::<f32>();
+        let count = cmp::min(
+            region_size / mem::size_of::<f32>(),
+            buffer_shared[offset..].len(),
+        );
 
         let region_lock = Lock::new(region_locks[region * CACHE_LINE_SIZE..].as_ptr());
         region_lock.lock();
 
-        buffer_shared[address..][..size]
+        buffer_shared[offset..][..count]
             .iter_mut()
-            .zip(&buffer_send[address..][..size])
+            .zip(&buffer_send[offset..][..count])
             .for_each(|(shared, send)| *shared += send);
 
         region_lock.unlock();

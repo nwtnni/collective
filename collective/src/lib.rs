@@ -3,6 +3,7 @@
 #![allow(non_upper_case_globals)]
 
 mod barrier;
+mod mutex;
 
 use std::cmp;
 use std::env;
@@ -12,7 +13,6 @@ use std::mem;
 use std::os::unix::fs::OpenOptionsExt as _;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
-use std::sync::Mutex;
 
 use anyhow::anyhow;
 use anyhow::Context as _;
@@ -21,6 +21,7 @@ use mpi::traits::Communicator as _;
 use once_cell::sync::Lazy;
 
 use barrier::Barrier;
+use mutex::Mutex;
 
 static _MPI_Init_thread: Lazy<
     unsafe extern "C" fn(
@@ -39,7 +40,8 @@ static _MPI_Init_thread: Lazy<
 });
 
 static PCI_FILE: Lazy<fs::File> = Lazy::new(|| initialize_file().unwrap());
-static PCI_MAP: Lazy<Mutex<MmapMut>> = Lazy::new(|| initialize_map().map(Mutex::new).unwrap());
+static PCI_MAP: Lazy<std::sync::Mutex<MmapMut>> =
+    Lazy::new(|| initialize_map().map(std::sync::Mutex::new).unwrap());
 
 const CACHE_LINE_SIZE: usize = 64;
 const PAGE_SIZE: usize = 4096;
@@ -160,7 +162,7 @@ pub unsafe extern "C" fn MPI_Allreduce(
     // Partition shared memory into disjoint areas
     let (barrier, locks, buffer_shared) = {
         let (barrier, remainder) = pci_map.split_at_mut(Barrier::SIZE);
-        let (locks, remainder) = remainder.split_at_mut(Lock::SIZE * region_count);
+        let (locks, remainder) = remainder.split_at_mut(Mutex::SIZE * region_count);
         let (prefix, data, suffix) = remainder[..data_size].align_to_mut::<f32>();
 
         assert!(prefix.is_empty());
@@ -176,7 +178,7 @@ pub unsafe extern "C" fn MPI_Allreduce(
         let locks = (0..region_count)
             .map(|region| region * region_size)
             .map(|offset| locks[offset..].as_ptr())
-            .map(|address| unsafe { Lock::new(address) })
+            .map(|address| unsafe { Mutex::new(address) })
             .collect::<Vec<_>>();
 
         (barrier, locks, data)
@@ -211,36 +213,6 @@ pub unsafe extern "C" fn MPI_Allreduce(
 
     buffer_receive.copy_from_slice(buffer_shared);
     mpi::ffi::MPI_SUCCESS as ffi::c_int
-}
-
-struct Lock<'pci>(&'pci AtomicU64);
-
-impl<'pci> Lock<'pci> {
-    const UNLOCKED: u64 = 0;
-    const LOCKED: u64 = 1;
-    pub const SIZE: usize = CACHE_LINE_SIZE;
-
-    unsafe fn new(address: *const u8) -> Self {
-        Self(&*address.cast::<AtomicU64>())
-    }
-
-    fn lock(&self) {
-        while self.0.load(Ordering::Acquire) == Self::LOCKED
-            || self
-                .0
-                .compare_exchange(
-                    Self::UNLOCKED,
-                    Self::LOCKED,
-                    Ordering::AcqRel,
-                    Ordering::Acquire,
-                )
-                .is_err()
-        {}
-    }
-
-    fn unlock(&self) {
-        self.0.store(Self::UNLOCKED, Ordering::Release);
-    }
 }
 
 fn initialize_file() -> anyhow::Result<fs::File> {

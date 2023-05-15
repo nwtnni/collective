@@ -2,6 +2,8 @@
 #![allow(non_camel_case_types)]
 #![allow(non_upper_case_globals)]
 
+mod barrier;
+
 use std::cmp;
 use std::env;
 use std::ffi;
@@ -18,6 +20,8 @@ use memmap2::MmapMut;
 use mpi::traits::Communicator as _;
 use once_cell::sync::Lazy;
 
+use barrier::Barrier;
+
 static _MPI_Init_thread: Lazy<
     unsafe extern "C" fn(
         *const ffi::c_int,
@@ -29,15 +33,6 @@ static _MPI_Init_thread: Lazy<
     mem::transmute(libc::dlsym(
         libc::RTLD_NEXT,
         ffi::CStr::from_bytes_with_nul(b"MPI_Init_thread\0")
-            .unwrap()
-            .as_ptr(),
-    ))
-});
-
-static _MPI_Barrier: Lazy<unsafe extern "C" fn(mpi::ffi::MPI_Comm)> = Lazy::new(|| unsafe {
-    mem::transmute(libc::dlsym(
-        libc::RTLD_NEXT,
-        ffi::CStr::from_bytes_with_nul(b"MPI_Barrier\0")
             .unwrap()
             .as_ptr(),
     ))
@@ -143,49 +138,51 @@ pub unsafe extern "C" fn MPI_Allreduce(
     let buffer_send = std::slice::from_raw_parts(buffer_send as *const f32, count as usize);
     let buffer_receive = std::slice::from_raw_parts_mut(buffer_receive as *mut f32, count as usize);
 
-    // | Region 0 Lock (64B)   |
-    // | Region 1 Lock (64B)   |
-    // | ...                   |
-    // | Broadcast Ready (64B) |
-    // | Broadcast Start (64B) |
-    // | ...                   |
-    // | Region 0 (4KiB)       | <- P0
-    // | ...                   |
-    // | Region 8 (4KiB)       | <- P1
-    // | ...                   |
-    // | Region 16 (4KiB)      | <- P2
-    // | ...                   |
-    // | Region 24 (4KiB)      | <- P3
-    // | ...                   |
+    // | Barrier (128B)      |
+    // | Region 0 Lock (64B) |
+    // | Region 1 Lock (64B) |
+    // | ...                 |
+    // | Region 0 (4KiB)     | <- P0
+    // | ...                 |
+    // | Region 8 (4KiB)     | <- P1
+    // | ...                 |
+    // | Region 16 (4KiB)    | <- P2
+    // | ...                 |
+    // | Region 24 (4KiB)    | <- P3
+    // | ...                 |
     let region_size = PAGE_SIZE;
     let data_size = count as usize * mem::size_of::<f32>();
     let region_count = (data_size + region_size - 1) / region_size;
     let region_offset = comm.rank() as usize * (region_count / comm.size() as usize);
-    let metadata_size = (region_count + 2) * CACHE_LINE_SIZE;
 
     let mut pci_map = PCI_MAP.lock().unwrap();
 
-    // FIXME: coordinate zeroing through shared memory
-    if comm.rank() == 0 {
-        pci_map.fill(0);
-    }
-    _MPI_Barrier(comm.0);
-
     // Partition shared memory into disjoint areas
-    let (region_locks, broadcast_ready, broadcast_start, buffer_shared) = {
-        let (metadata, data) = pci_map.split_at_mut(metadata_size);
-        let (locks, barrier) = metadata.split_at_mut(region_count * CACHE_LINE_SIZE);
-        let (ready, start) = barrier.split_at_mut(CACHE_LINE_SIZE);
+    let (barrier, locks, buffer_shared) = {
+        let (barrier, remainder) = pci_map.split_at_mut(Barrier::SIZE);
+        let (locks, remainder) = remainder.split_at_mut(Lock::SIZE * region_count);
+        let (prefix, data, suffix) = remainder[..data_size].align_to_mut::<f32>();
 
-        let ready = &*ready.as_ptr().cast::<AtomicU64>();
-        let start = &*start.as_ptr().cast::<AtomicU64>();
-
-        let (prefix, data, suffix) = data[..data_size].align_to_mut::<f32>();
         assert!(prefix.is_empty());
         assert!(suffix.is_empty());
 
-        (locks, ready, start, data)
+        // Zero memory
+        if comm.rank() == 0 {
+            locks.fill(0);
+            data.fill(0.0);
+        }
+
+        let barrier = Barrier::new(barrier.as_ptr());
+        let locks = (0..region_count)
+            .map(|region| region * region_size)
+            .map(|offset| locks[offset..].as_ptr())
+            .map(|address| unsafe { Lock::new(address) })
+            .collect::<Vec<_>>();
+
+        (barrier, locks, data)
     };
+
+    barrier.wait(comm.size());
 
     // Start at different offsets
     for region in (0..region_count)
@@ -199,23 +196,18 @@ pub unsafe extern "C" fn MPI_Allreduce(
             buffer_shared[offset..].len(),
         );
 
-        let region_lock = Lock::new(region_locks[region * CACHE_LINE_SIZE..].as_ptr());
-        region_lock.lock();
+        locks[region].lock();
 
         buffer_shared[offset..][..count]
             .iter_mut()
             .zip(&buffer_send[offset..][..count])
             .for_each(|(shared, send)| *shared += send);
 
-        region_lock.unlock();
+        locks[region].unlock();
     }
 
     // Wait for all processes to finish writes
-    if broadcast_ready.fetch_add(1, Ordering::AcqRel) == comm.size() as u64 - 1 {
-        broadcast_start.store(1, Ordering::Release);
-    }
-
-    while broadcast_start.load(Ordering::Acquire) == 0 {}
+    barrier.wait(comm.size());
 
     buffer_receive.copy_from_slice(buffer_shared);
     mpi::ffi::MPI_SUCCESS as ffi::c_int
@@ -226,6 +218,7 @@ struct Lock<'pci>(&'pci AtomicU64);
 impl<'pci> Lock<'pci> {
     const UNLOCKED: u64 = 0;
     const LOCKED: u64 = 1;
+    pub const SIZE: usize = CACHE_LINE_SIZE;
 
     unsafe fn new(address: *const u8) -> Self {
         Self(&*address.cast::<AtomicU64>())

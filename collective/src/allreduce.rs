@@ -32,8 +32,8 @@ pub unsafe extern "C" fn MPI_Allreduce(
     // | ...                 |
     // | Region 24 (4KiB)    | <- P3
     // | ...                 |
-    let region_size = crate::PAGE_SIZE;
     let data_size = count as usize * mem::size_of::<f32>();
+    let region_size = crate::PAGE_SIZE;
     let region_count = (data_size + region_size - 1) / region_size;
     let region_offset = comm.rank() as usize * (region_count / comm.size() as usize);
 
@@ -56,7 +56,7 @@ pub unsafe extern "C" fn MPI_Allreduce(
 
         let barrier = Barrier::new(barrier.as_ptr());
         let locks = (0..region_count)
-            .map(|region| region * region_size)
+            .map(|region| region * Mutex::SIZE)
             .map(|offset| locks[offset..].as_ptr())
             .map(|address| unsafe { Mutex::new(address) })
             .collect::<Vec<_>>();

@@ -3,6 +3,7 @@
 #![allow(non_upper_case_globals)]
 
 mod barrier;
+mod broadcast;
 mod mutex;
 
 use std::cmp;
@@ -11,8 +12,6 @@ use std::ffi;
 use std::fs;
 use std::mem;
 use std::os::unix::fs::OpenOptionsExt as _;
-use std::sync::atomic::AtomicU64;
-use std::sync::atomic::Ordering;
 
 use anyhow::anyhow;
 use anyhow::Context as _;
@@ -46,8 +45,6 @@ static PCI_MAP: Lazy<std::sync::Mutex<MmapMut>> =
 const CACHE_LINE_SIZE: usize = 64;
 const PAGE_SIZE: usize = 4096;
 
-static EPOCH: AtomicU64 = AtomicU64::new(0);
-
 struct Communicator(mpi::ffi::MPI_Comm);
 
 unsafe impl mpi::traits::AsRaw for Communicator {
@@ -69,62 +66,6 @@ pub unsafe extern "C" fn MPI_Init_thread(
     Lazy::force(&PCI_FILE);
     Lazy::force(&PCI_MAP);
     _MPI_Init_thread(argc, argv, required, provided)
-}
-
-#[no_mangle]
-pub unsafe extern "C" fn MPI_Bcast(
-    buffer: *mut ffi::c_void,
-    count: ffi::c_int,
-    _: mpi::ffi::MPI_Datatype,
-    root: ffi::c_int,
-    comm: mpi::ffi::MPI_Comm,
-) -> ffi::c_int {
-    let comm = Communicator(comm);
-
-    if comm.size() == 1 {
-        return mpi::ffi::MPI_SUCCESS as ffi::c_int;
-    }
-
-    let epoch_before = EPOCH.load(Ordering::Acquire);
-    let epoch_after = epoch_before + comm.size() as u64;
-
-    if comm.rank() == root {
-        unsafe {
-            let mut shared = PCI_MAP.lock().unwrap();
-
-            let local = std::slice::from_raw_parts(buffer as *const u8, count as usize);
-
-            shared[CACHE_LINE_SIZE..][..count as usize].copy_from_slice(local);
-
-            // https://doc.rust-lang.org/src/core/sync/atomic.rs.html#2090-2092
-            let epoch = &*shared.as_ptr().cast::<AtomicU64>();
-
-            // Kick off broadcast
-            epoch.fetch_add(1, Ordering::AcqRel);
-
-            // Spin waiting for everyone to read
-            while epoch.load(Ordering::Acquire) < epoch_after {}
-        }
-    } else {
-        unsafe {
-            let shared = PCI_MAP.lock().unwrap();
-
-            // https://doc.rust-lang.org/src/core/sync/atomic.rs.html#2090-2092
-            let epoch = &*shared.as_ptr().cast::<AtomicU64>();
-
-            // Spin until broadcast starts
-            while epoch.load(Ordering::Acquire) == epoch_before {}
-
-            let local = std::slice::from_raw_parts_mut(buffer as *mut u8, count as usize);
-            local.copy_from_slice(&shared[CACHE_LINE_SIZE..][..count as usize]);
-
-            // Update broadcaster
-            epoch.fetch_add(1, Ordering::AcqRel);
-        }
-    }
-
-    EPOCH.store(epoch_after, Ordering::Release);
-    mpi::ffi::MPI_SUCCESS as ffi::c_int
 }
 
 #[no_mangle]

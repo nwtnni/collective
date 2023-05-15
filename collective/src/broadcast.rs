@@ -12,12 +12,19 @@ pub unsafe extern "C" fn MPI_Bcast(
     root: ffi::c_int,
     comm: mpi::ffi::MPI_Comm,
 ) -> ffi::c_int {
+    let local = std::slice::from_raw_parts_mut(buffer as *mut u8, count as usize);
     let comm = crate::Communicator(comm);
 
     if comm.size() == 1 {
         return mpi::ffi::MPI_SUCCESS as ffi::c_int;
     }
 
+    broadcast(local, root, comm);
+
+    mpi::ffi::MPI_SUCCESS as ffi::c_int
+}
+
+fn broadcast(local: &mut [u8], root: ffi::c_int, comm: crate::Communicator) {
     static EPOCH: AtomicU64 = AtomicU64::new(0);
 
     let epoch_before = EPOCH.load(Ordering::Acquire);
@@ -27,9 +34,7 @@ pub unsafe extern "C" fn MPI_Bcast(
         unsafe {
             let mut shared = crate::PCI_MAP.lock().unwrap();
 
-            let local = std::slice::from_raw_parts(buffer as *const u8, count as usize);
-
-            shared[crate::CACHE_LINE_SIZE..][..count as usize].copy_from_slice(local);
+            shared[crate::CACHE_LINE_SIZE..][..local.len()].copy_from_slice(local);
 
             // https://doc.rust-lang.org/src/core/sync/atomic.rs.html#2090-2092
             let epoch = &*shared.as_ptr().cast::<AtomicU64>();
@@ -50,8 +55,7 @@ pub unsafe extern "C" fn MPI_Bcast(
             // Spin until broadcast starts
             while epoch.load(Ordering::Acquire) == epoch_before {}
 
-            let local = std::slice::from_raw_parts_mut(buffer as *mut u8, count as usize);
-            local.copy_from_slice(&shared[crate::CACHE_LINE_SIZE..][..count as usize]);
+            local.copy_from_slice(&shared[crate::CACHE_LINE_SIZE..][..local.len()]);
 
             // Update broadcaster
             epoch.fetch_add(1, Ordering::AcqRel);
@@ -59,5 +63,4 @@ pub unsafe extern "C" fn MPI_Bcast(
     }
 
     EPOCH.store(epoch_after, Ordering::Release);
-    mpi::ffi::MPI_SUCCESS as ffi::c_int
 }

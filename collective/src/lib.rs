@@ -5,6 +5,7 @@
 mod allreduce;
 mod barrier;
 mod broadcast;
+mod datatype;
 mod mutex;
 
 use std::env;

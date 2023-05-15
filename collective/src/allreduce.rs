@@ -5,6 +5,7 @@ use std::mem;
 use mpi::traits::Communicator as _;
 
 use crate::barrier::Barrier;
+use crate::datatype::MpiType;
 use crate::mutex::Mutex;
 
 #[no_mangle]
@@ -12,13 +13,31 @@ pub unsafe extern "C" fn MPI_Allreduce(
     buffer_send: *const ffi::c_void,
     buffer_receive: *mut ffi::c_void,
     count: ffi::c_int,
-    _: mpi::ffi::MPI_Datatype,
+    datatype: mpi::ffi::MPI_Datatype,
     _: mpi::ffi::MPI_Op,
     comm: mpi::ffi::MPI_Comm,
 ) -> ffi::c_int {
-    let buffer_send = std::slice::from_raw_parts(buffer_send as *const f32, count as usize);
-    let buffer_receive = std::slice::from_raw_parts_mut(buffer_receive as *mut f32, count as usize);
     let comm = crate::Communicator(comm);
+
+    if f32::matches(datatype) {
+        allreduce_sum::<f32>(buffer_send, buffer_receive, count, comm);
+    } else if i32::matches(datatype) {
+        allreduce_sum::<i32>(buffer_send, buffer_receive, count, comm);
+    } else if i8::matches(datatype) {
+        allreduce_sum::<i8>(buffer_send, buffer_receive, count, comm);
+    }
+
+    mpi::ffi::MPI_SUCCESS as ffi::c_int
+}
+
+unsafe fn allreduce_sum<T: MpiType + Copy>(
+    buffer_send: *const ffi::c_void,
+    buffer_receive: *mut ffi::c_void,
+    count: ffi::c_int,
+    comm: crate::Communicator,
+) {
+    let buffer_send = std::slice::from_raw_parts(buffer_send as *const T, count as usize);
+    let buffer_receive = std::slice::from_raw_parts_mut(buffer_receive as *mut T, count as usize);
 
     // | Barrier (128B)      |
     // | Region 0 Lock (64B) |
@@ -32,7 +51,7 @@ pub unsafe extern "C" fn MPI_Allreduce(
     // | ...                 |
     // | Region 24 (4KiB)    | <- P3
     // | ...                 |
-    let data_size = count as usize * mem::size_of::<f32>();
+    let data_size = buffer_send.len() * mem::size_of::<T>();
     let region_size = crate::PAGE_SIZE;
     let region_count = (data_size + region_size - 1) / region_size;
     let region_offset = comm.rank() as usize * (region_count / comm.size() as usize);
@@ -43,22 +62,23 @@ pub unsafe extern "C" fn MPI_Allreduce(
     let (barrier, locks, buffer_shared) = {
         let (barrier, remainder) = pci_map.split_at_mut(Barrier::SIZE);
         let (locks, remainder) = remainder.split_at_mut(Mutex::SIZE * region_count);
-        let (prefix, data, suffix) = remainder[..data_size].align_to_mut::<f32>();
-
-        assert!(prefix.is_empty());
-        assert!(suffix.is_empty());
 
         // Zero memory
         if comm.rank() == 0 {
             locks.fill(0);
-            data.fill(0.0);
+            remainder[..data_size].fill(0);
         }
 
-        let barrier = Barrier::new(barrier.as_ptr());
+        let (prefix, data, suffix) = remainder[..data_size].align_to_mut::<T>();
+
+        assert!(prefix.is_empty());
+        assert!(suffix.is_empty());
+
+        let barrier = unsafe { Barrier::new(barrier.as_ptr()) };
         let locks = (0..region_count)
             .map(|region| region * Mutex::SIZE)
             .map(|offset| locks[offset..].as_ptr())
-            .map(|address| unsafe { Mutex::new(address) })
+            .map(|address| Mutex::new(address))
             .collect::<Vec<_>>();
 
         (barrier, locks, data)
@@ -72,9 +92,9 @@ pub unsafe extern "C" fn MPI_Allreduce(
         .skip(region_offset)
         .take(region_count)
     {
-        let offset = region * region_size / mem::size_of::<f32>();
+        let offset = region * region_size / mem::size_of::<T>();
         let count = cmp::min(
-            region_size / mem::size_of::<f32>(),
+            region_size / mem::size_of::<T>(),
             buffer_shared[offset..].len(),
         );
 
@@ -83,7 +103,7 @@ pub unsafe extern "C" fn MPI_Allreduce(
         buffer_shared[offset..][..count]
             .iter_mut()
             .zip(&buffer_send[offset..][..count])
-            .for_each(|(shared, send)| *shared += send);
+            .for_each(|(shared, send)| shared.sum_mut(send));
 
         locks[region].unlock();
     }
@@ -92,5 +112,4 @@ pub unsafe extern "C" fn MPI_Allreduce(
     barrier.wait(comm.size());
 
     buffer_receive.copy_from_slice(buffer_shared);
-    mpi::ffi::MPI_SUCCESS as ffi::c_int
 }

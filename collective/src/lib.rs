@@ -71,11 +71,20 @@ fn initialize_file() -> anyhow::Result<fs::File> {
         .context("Missing COLLECTIVE_PCI_PATH environment variable")?;
     let path = path.trim();
 
+    let o_direct = match env::var("COLLECTIVE_O_DIRECT") {
+        Ok(_) => libc::O_DIRECT,
+        Err(_) => 0,
+    };
+
+    let o_sync = match env::var("COLLECTIVE_O_SYNC") {
+        Ok(_) => libc::O_SYNC,
+        Err(_) => 0,
+    };
+
     fs::File::options()
         .read(true)
         .write(true)
-        .custom_flags(libc::O_DIRECT)
-        .custom_flags(libc::O_SYNC)
+        .custom_flags(o_direct | o_sync)
         .open(path)
         .with_context(|| anyhow!("Failed to read {}", path))
 }

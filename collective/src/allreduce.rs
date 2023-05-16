@@ -39,9 +39,9 @@ unsafe fn allreduce_sum<T: MpiType + Copy>(
     let buffer_send = std::slice::from_raw_parts(buffer_send as *const T, count as usize);
     let buffer_receive = std::slice::from_raw_parts_mut(buffer_receive as *mut T, count as usize);
 
-    // | Barrier (128B)      |
-    // | Region 0 Lock (64B) |
-    // | Region 1 Lock (64B) |
+    // | Barrier             |
+    // | Region 0 Lock       |
+    // | Region 1 Lock       |
     // | ...                 |
     // | Region 0 (4KiB)     | <- P0
     // | ...                 |

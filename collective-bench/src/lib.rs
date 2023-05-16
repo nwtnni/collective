@@ -1,6 +1,5 @@
 mod allreduce;
 mod broadcast;
-mod reduce;
 
 use std::io;
 use std::io::BufRead as _;
@@ -14,7 +13,6 @@ use hdrhistogram::Histogram;
 pub enum Benchmark {
     Allreduce(allreduce::Allreduce),
     Broadcast(broadcast::Broadcast),
-    Reduce(reduce::Reduce),
     Summarize,
 }
 
@@ -56,8 +54,9 @@ impl Benchmark {
                     Benchmark::Allreduce(allreduce) => {
                         allreduce.run(&world, *size, configuration.validate)?
                     }
-                    Benchmark::Broadcast(broadcast) => broadcast.run(&world, *size, configuration.validate)?,
-                    Benchmark::Reduce(reduce) => reduce.run(&world, *size),
+                    Benchmark::Broadcast(broadcast) => {
+                        broadcast.run(&world, *size, configuration.validate)?
+                    }
                     Benchmark::Summarize { .. } => unreachable!(),
                 };
 

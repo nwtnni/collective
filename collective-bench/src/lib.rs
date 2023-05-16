@@ -28,6 +28,9 @@ pub struct Configuration {
 
     #[arg(short, long, value_delimiter = ',')]
     sizes: Vec<usize>,
+
+    #[arg(short, long)]
+    validate: bool,
 }
 
 #[derive(Copy, Clone, clap::ValueEnum)]
@@ -49,8 +52,10 @@ impl Benchmark {
             write!(stdout, "{size}")?;
 
             for iteration in 0..configuration.warmup + configuration.iterations {
-                let duration = match &mut self {
-                    Benchmark::Allreduce(allreduce) => allreduce.run(&world, *size),
+                let duration = match &self {
+                    Benchmark::Allreduce(allreduce) => {
+                        allreduce.run(&world, *size, configuration.validate)?
+                    }
                     Benchmark::Broadcast(broadcast) => broadcast.run(&world, *size),
                     Benchmark::Reduce(reduce) => reduce.run(&world, *size),
                     Benchmark::Summarize { .. } => unreachable!(),

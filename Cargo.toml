@@ -1,2 +1,2 @@
 [workspace]
-members = ["collective", "plot"]
+members = ["collective", "collective-bench", "plot"]

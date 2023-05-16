@@ -56,7 +56,7 @@ impl Benchmark {
                     Benchmark::Allreduce(allreduce) => {
                         allreduce.run(&world, *size, configuration.validate)?
                     }
-                    Benchmark::Broadcast(broadcast) => broadcast.run(&world, *size),
+                    Benchmark::Broadcast(broadcast) => broadcast.run(&world, *size, configuration.validate)?,
                     Benchmark::Reduce(reduce) => reduce.run(&world, *size),
                     Benchmark::Summarize { .. } => unreachable!(),
                 };

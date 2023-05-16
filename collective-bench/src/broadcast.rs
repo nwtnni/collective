@@ -1,5 +1,7 @@
 use std::time::Instant;
 
+use anyhow::anyhow;
+use anyhow::Context as _;
 use mpi::topology::SystemCommunicator;
 use mpi::traits::Communicator as _;
 use mpi::traits::CommunicatorCollectives as _;
@@ -9,7 +11,12 @@ use mpi::traits::Root as _;
 pub struct Broadcast;
 
 impl Broadcast {
-    pub fn run(&self, world: &SystemCommunicator, size: usize) -> u64 {
+    pub fn run(
+        &self,
+        world: &SystemCommunicator,
+        size: usize,
+        validate: bool,
+    ) -> anyhow::Result<u64> {
         let root = world.process_at_rank(0);
 
         let mut buffer = vec![0u8; size];
@@ -26,9 +33,23 @@ impl Broadcast {
         root.broadcast_into(&mut buffer[..]);
         let end = Instant::now();
 
+        if validate {
+            for (index, actual) in buffer.into_iter().enumerate() {
+                let expected = index as u8;
+                if actual != expected {
+                    return Err(anyhow!(
+                        "Expected value {} at index {}, but found {}",
+                        expected,
+                        index,
+                        actual,
+                    ));
+                }
+            }
+        }
+
         end.duration_since(start)
             .as_nanos()
             .try_into()
-            .expect("Duration larger than 64 bits")
+            .context("Duration larger than 64 bits")
     }
 }

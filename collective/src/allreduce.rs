@@ -63,13 +63,15 @@ unsafe fn allreduce_sum<T: MpiType + Copy>(
         let (barrier, remainder) = pci_map.split_at_mut(Barrier::SIZE);
         let (locks, remainder) = remainder.split_at_mut(Mutex::SIZE * region_count);
 
+        let offset = remainder.as_ptr().align_offset(crate::PAGE_SIZE);
+
         // Zero memory
         if comm.rank() == 0 {
             locks.fill(0);
-            remainder[..data_size].fill(0);
+            remainder[offset..][..data_size].fill(0);
         }
 
-        let (prefix, data, suffix) = remainder[..data_size].align_to_mut::<T>();
+        let (prefix, data, suffix) = remainder[offset..][..data_size].align_to_mut::<T>();
 
         assert!(prefix.is_empty());
         assert!(suffix.is_empty());

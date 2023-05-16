@@ -8,6 +8,7 @@ use std::io::Write as _;
 use anyhow::anyhow;
 use anyhow::Context;
 use hdrhistogram::Histogram;
+use mpi::traits::Communicator as _;
 
 #[derive(clap::Parser)]
 pub enum Benchmark {
@@ -47,7 +48,9 @@ impl Benchmark {
         let mut stdout = io::stdout().lock();
 
         for size in &configuration.sizes {
-            write!(stdout, "{size}")?;
+            if world.rank() == 0 {
+                write!(stdout, "{size}")?;
+            }
 
             for iteration in 0..configuration.warmup + configuration.iterations {
                 let duration = match &self {
@@ -60,12 +63,15 @@ impl Benchmark {
                     Benchmark::Summarize { .. } => unreachable!(),
                 };
 
-                if iteration >= configuration.warmup {
+                if iteration >= configuration.warmup && world.rank() == 0 {
                     write!(stdout, ",{}", duration)?;
                 }
             }
 
-            writeln!(stdout)?;
+            if world.rank() == 0 {
+                writeln!(stdout)?;
+                stdout.flush()?;
+            }
         }
 
         Ok(())

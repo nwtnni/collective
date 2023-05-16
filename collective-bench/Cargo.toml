@@ -8,4 +8,5 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0"
 clap = { version = "4.2", features = ["derive"] }
+hdrhistogram = "7.5"
 mpi = "0.6"

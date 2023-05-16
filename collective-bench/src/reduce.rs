@@ -1,40 +1,32 @@
-use std::env;
 use std::mem;
 
-use anyhow::anyhow;
 use mpi::collective::SystemOperation;
+use mpi::topology::SystemCommunicator;
 use mpi::traits::Communicator as _;
 use mpi::traits::CommunicatorCollectives as _;
 use mpi::traits::Root as _;
 
-fn main() -> anyhow::Result<()> {
-    let Some(bytes) = env::args().nth(1).and_then(|argument| argument.parse::<usize>().ok()) else {
-        return Err(anyhow!("Usage: reduce <BYTES>"));
-    };
+#[derive(clap::Parser)]
+pub struct Reduce;
 
-    assert!(bytes % mem::size_of::<f32>() == 0);
+impl Reduce {
+    pub fn run(&self, world: &SystemCommunicator, size: usize) -> f64 {
+        let root = world.process_at_rank(0);
 
-    let universe = mpi::initialize().expect("Failed to initialize MPI");
-    let world = universe.world();
-    let root = world.process_at_rank(0);
+        let local = (0..size / mem::size_of::<f32>())
+            .map(|index| (world.rank() + index as i32) as f32)
+            .collect::<Vec<_>>();
+        let mut global = vec![0; size / mem::size_of::<f32>()];
 
-    let local = (0..bytes / mem::size_of::<f32>())
-        .map(|index| (world.rank() + index as i32) as f32)
-        .collect::<Vec<_>>();
-    let mut global = vec![0; bytes / mem::size_of::<f32>()];
+        world.barrier();
+        let start = mpi::time();
+        if world.rank() == root.rank() {
+            root.reduce_into_root(&local, &mut global, SystemOperation::sum());
+        } else {
+            root.reduce_into(&local, SystemOperation::sum());
+        }
+        let end = mpi::time();
 
-    world.barrier();
-    let start = mpi::time();
-    if world.rank() == root.rank() {
-        root.reduce_into_root(&local, &mut global, SystemOperation::sum());
-    } else {
-        root.reduce_into(&local, SystemOperation::sum());
+        end - start
     }
-    let end = mpi::time();
-
-    if world.rank() == 0 {
-        println!("MPI_Reduce duration = {}", end - start);
-    }
-
-    Ok(())
 }

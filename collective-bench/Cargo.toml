@@ -7,5 +7,5 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0"
+clap = { version = "4.2", features = ["derive"] }
 mpi = "0.6"
-clap = "4.2"

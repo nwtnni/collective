@@ -1,4 +1,5 @@
 use std::mem;
+use std::time::Instant;
 
 use clap::Parser;
 use mpi::collective::SystemOperation;
@@ -13,7 +14,7 @@ pub struct Allreduce {
 }
 
 impl Allreduce {
-    pub fn run(&self, world: &SystemCommunicator, size: usize) -> f64 {
+    pub fn run(&self, world: &SystemCommunicator, size: usize) -> u64 {
         let local = (0..size / mem::size_of::<f32>())
             .map(|index| (world.rank() + index as i32) as f32)
             .collect::<Vec<_>>();
@@ -21,10 +22,13 @@ impl Allreduce {
         let mut global = vec![0; size / mem::size_of::<f32>()];
 
         world.barrier();
-        let start = mpi::time();
+        let start = Instant::now();
         world.all_reduce_into(&local, &mut global[..], SystemOperation::sum());
-        let end = mpi::time();
+        let end = Instant::now();
 
-        end - start
+        end.duration_since(start)
+            .as_nanos()
+            .try_into()
+            .expect("Duration larger than 64 bits")
     }
 }

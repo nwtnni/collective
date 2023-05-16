@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use mpi::topology::SystemCommunicator;
 use mpi::traits::Communicator as _;
 use mpi::traits::CommunicatorCollectives as _;
@@ -7,7 +9,7 @@ use mpi::traits::Root as _;
 pub struct Broadcast;
 
 impl Broadcast {
-    pub fn run(&self, world: &SystemCommunicator, size: usize) -> f64 {
+    pub fn run(&self, world: &SystemCommunicator, size: usize) -> u64 {
         let root = world.process_at_rank(0);
 
         let mut buffer = vec![0u8; size];
@@ -20,10 +22,13 @@ impl Broadcast {
         }
 
         world.barrier();
-        let start = mpi::time();
+        let start = Instant::now();
         root.broadcast_into(&mut buffer[..]);
-        let end = mpi::time();
+        let end = Instant::now();
 
-        end - start
+        end.duration_since(start)
+            .as_nanos()
+            .try_into()
+            .expect("Duration larger than 64 bits")
     }
 }

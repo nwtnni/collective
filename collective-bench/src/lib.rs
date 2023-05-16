@@ -2,6 +2,9 @@ mod allreduce;
 mod broadcast;
 mod reduce;
 
+use std::io;
+use std::io::Write as _;
+
 use anyhow::anyhow;
 
 #[derive(clap::Parser)]
@@ -32,8 +35,11 @@ impl Benchmark {
     pub fn run(mut self, configuration: &Configuration) -> anyhow::Result<()> {
         let universe = mpi::initialize().ok_or_else(|| anyhow!("Failed to initialize MPI"))?;
         let world = universe.world();
+        let mut stdout = io::stdout().lock();
 
         for size in &configuration.sizes {
+            write!(stdout, "{size}")?;
+
             for iteration in 0..configuration.warmup + configuration.iterations {
                 let duration = match &mut self {
                     Benchmark::Allreduce(allreduce) => allreduce.run(&world, *size),
@@ -42,9 +48,11 @@ impl Benchmark {
                 };
 
                 if iteration >= configuration.warmup {
-                    println!("{duration}");
+                    write!(stdout, ",{}", duration)?;
                 }
             }
+
+            writeln!(stdout)?;
         }
 
         Ok(())

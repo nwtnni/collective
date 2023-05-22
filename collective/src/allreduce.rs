@@ -90,7 +90,7 @@ unsafe fn allreduce_sum<T: MpiType + Copy>(
         (barrier, locks, data)
     };
 
-    barrier.wait(comm.size());
+    barrier.wait(comm.rank(), comm.size());
 
     // Start at different offsets
     for region in (0..region_count)
@@ -115,7 +115,7 @@ unsafe fn allreduce_sum<T: MpiType + Copy>(
     }
 
     // Wait for all processes to finish writes
-    barrier.wait(comm.size());
+    barrier.wait(comm.rank(), comm.size());
 
     buffer_receive.copy_from_slice(buffer_shared);
 }

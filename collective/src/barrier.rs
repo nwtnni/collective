@@ -2,6 +2,8 @@ use std::ffi;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering;
 
+use crate::metrics;
+
 pub struct Barrier<'pci>(&'pci AtomicU64);
 
 impl<'pci> Barrier<'pci> {
@@ -20,8 +22,10 @@ impl<'pci> Barrier<'pci> {
         let epoch_after = epoch_before + total;
 
         if self.0.fetch_add(1, Ordering::AcqRel) + 1 < epoch_after {
-            // Spin waiting for all processes to reach barrier
-            while self.0.load(Ordering::Acquire) < epoch_after {}
+            metrics::time!(metrics::timers::BARRIER, {
+                // Spin waiting for all processes to reach barrier
+                while self.0.load(Ordering::Acquire) < epoch_after {}
+            });
         }
 
         EPOCH.store(epoch_after, Ordering::Release);

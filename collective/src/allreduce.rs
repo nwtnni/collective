@@ -6,6 +6,7 @@ use mpi::traits::Communicator as _;
 
 use crate::barrier::Barrier;
 use crate::datatype::MpiType;
+use crate::metrics;
 use crate::mutex::Mutex;
 
 #[no_mangle]
@@ -19,14 +20,17 @@ pub unsafe extern "C" fn MPI_Allreduce(
 ) -> ffi::c_int {
     let comm = crate::Communicator(comm);
 
-    if f32::matches(datatype) {
-        allreduce_sum::<f32>(buffer_send, buffer_receive, count, comm);
-    } else if i32::matches(datatype) {
-        allreduce_sum::<i32>(buffer_send, buffer_receive, count, comm);
-    } else if i8::matches(datatype) {
-        allreduce_sum::<i8>(buffer_send, buffer_receive, count, comm);
-    }
+    metrics::time!(metrics::timers::TOTAL, {
+        if f32::matches(datatype) {
+            allreduce_sum::<f32>(buffer_send, buffer_receive, count, comm);
+        } else if i32::matches(datatype) {
+            allreduce_sum::<i32>(buffer_send, buffer_receive, count, comm);
+        } else if i8::matches(datatype) {
+            allreduce_sum::<i8>(buffer_send, buffer_receive, count, comm);
+        }
+    });
 
+    metrics::dump();
     mpi::ffi::MPI_SUCCESS as ffi::c_int
 }
 
@@ -101,12 +105,12 @@ unsafe fn allreduce_sum<T: MpiType + Copy>(
         );
 
         locks[region].lock();
-
-        buffer_shared[offset..][..count]
-            .iter_mut()
-            .zip(&buffer_send[offset..][..count])
-            .for_each(|(shared, send)| shared.sum_mut(send));
-
+        metrics::time!(metrics::timers::COMPUTE, {
+            buffer_shared[offset..][..count]
+                .iter_mut()
+                .zip(&buffer_send[offset..][..count])
+                .for_each(|(shared, send)| shared.sum_mut(send));
+        });
         locks[region].unlock();
     }
 

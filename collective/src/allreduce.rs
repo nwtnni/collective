@@ -47,7 +47,7 @@ unsafe fn allreduce<T: MpiType + Copy>(
 
     match algorithm.as_deref() {
         Ok("single") | Err(_) => allreduce_single(buffer_send, buffer_receive, comm),
-        Ok("multiple") => todo!(),
+        Ok("multiple") => allreduce_multiple(buffer_send, buffer_receive, comm),
         Ok(algorithm) => panic!("Unknown allreduce algorithm: {}", algorithm),
     }
 }
@@ -132,4 +132,73 @@ unsafe fn allreduce_single<T: MpiType + Copy>(
     barrier.wait(comm.rank(), comm.size());
 
     buffer_receive.copy_from_slice(buffer_shared);
+}
+
+unsafe fn allreduce_multiple<T: MpiType + Copy>(
+    buffer_send: &[T],
+    buffer_receive: &mut [T],
+    comm: crate::Communicator,
+) {
+    let comm_rank = comm.rank() as usize;
+    let comm_size = comm.size() as usize;
+
+    let byte_size = buffer_send.len() * mem::size_of::<T>();
+    let byte_size_aligned = align(byte_size);
+
+    let data_size = buffer_send.len();
+    let data_size_aligned = byte_size_aligned / mem::size_of::<T>();
+
+    let mut pci_map = crate::PCI_MAP.lock().unwrap();
+
+    let (barrier, remainder) = pci_map.split_at_mut(Barrier::SIZE);
+    let barrier = Barrier::new(barrier.as_ptr());
+    let offset = remainder.as_ptr().align_offset(crate::PAGE_SIZE);
+
+    let (buffer_shared_send_all, remainder) =
+        remainder[offset..].split_at_mut(byte_size_aligned * comm_size);
+
+    let (prefix, buffer_shared_send_all, suffix) = buffer_shared_send_all.align_to_mut::<T>();
+    assert_eq!(prefix.len(), 0);
+    assert_eq!(suffix.len(), 0);
+
+    let buffer_shared = &mut remainder[..byte_size];
+    if comm.rank() == 0 {
+        buffer_shared.fill(0);
+    }
+
+    let (prefix, buffer_shared, suffix) = buffer_shared.align_to_mut::<T>();
+    assert_eq!(prefix.len(), 0);
+    assert_eq!(suffix.len(), 0);
+
+    buffer_shared_send_all[data_size_aligned * comm_rank..][..data_size]
+        .copy_from_slice(buffer_send);
+
+    barrier.wait(comm_rank as i32, comm_size as i32);
+
+    let partition = cmp::max(crate::PAGE_SIZE, align(byte_size / comm_size)) / mem::size_of::<T>();
+
+    if partition * comm_rank < data_size {
+        (0..comm_size)
+            .map(|rank| {
+                let send = &buffer_shared_send_all[data_size_aligned * rank..][..data_size]
+                    [partition * comm_rank..];
+                let len = cmp::min(send.len(), partition);
+                &send[..len]
+            })
+            .for_each(|buffer_send| {
+                let shared = &mut buffer_shared[partition * comm_rank..];
+                let len = cmp::min(shared.len(), partition);
+                shared[..len]
+                    .iter_mut()
+                    .zip(buffer_send)
+                    .for_each(|(shared, send)| shared.sum_mut(send));
+            });
+    }
+
+    barrier.wait(comm.rank(), comm.size());
+    buffer_receive.copy_from_slice(buffer_shared);
+}
+
+fn align(value: usize) -> usize {
+    (value + crate::PAGE_SIZE - 1) & !(crate::PAGE_SIZE - 1)
 }

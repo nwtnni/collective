@@ -23,6 +23,7 @@ use once_cell::sync::Lazy;
 const CACHE_LINE_SIZE: usize = 64;
 const PAGE_SIZE: usize = 4096;
 
+static PCI_SIZE: Lazy<usize> = Lazy::new(|| initialize_size().unwrap());
 static PCI_FILE: Lazy<fs::File> = Lazy::new(|| initialize_file().unwrap());
 static PCI_MAP: Lazy<std::sync::Mutex<MmapMut>> =
     Lazy::new(|| initialize_map().map(std::sync::Mutex::new).unwrap());
@@ -68,6 +69,13 @@ pub unsafe extern "C" fn MPI_Init_thread(
     _MPI_Init_thread(argc, argv, required, provided)
 }
 
+fn initialize_size() -> anyhow::Result<usize> {
+    env::var("COLLECTIVE_PCI_SIZE")
+        .context("Missing COLLECTIVE_PCI_SIZE environment variable")?
+        .parse::<usize>()
+        .context("Failed to parse COLLECTIVE_PCI_SIZE as usize")
+}
+
 fn initialize_file() -> anyhow::Result<fs::File> {
     let path = env::var("COLLECTIVE_PCI_PATH")
         .context("Missing COLLECTIVE_PCI_PATH environment variable")?;
@@ -92,5 +100,10 @@ fn initialize_file() -> anyhow::Result<fs::File> {
 }
 
 fn initialize_map() -> anyhow::Result<MmapMut> {
-    unsafe { MmapMut::map_mut(&*PCI_FILE).context("Failed to mmap PCI file") }
+    unsafe {
+        memmap2::MmapOptions::new()
+            .len(*PCI_SIZE)
+            .map_mut(&*PCI_FILE)
+            .context("Failed to mmap PCI file")
+    }
 }

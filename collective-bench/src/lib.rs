@@ -113,7 +113,7 @@ impl Benchmark {
             )?;
 
             for percentile in [0.0, 25.0, 50.0, 75.0, 90.0, 99.0, 99.9, 99.99, 100.0] {
-                write!(stdout, "{}", histogram.value_at_percentile(percentile))?;
+                write!(stdout, ",{}", histogram.value_at_percentile(percentile))?;
             }
 
             writeln!(stdout)?;

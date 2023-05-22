@@ -66,11 +66,11 @@ pub fn dump() {
     let uncontended = counters::MUTEX_UNCONTENDED.load(Ordering::Acquire);
 
     eprintln!(
-        "total {}us\n\
-        \t{}us ({:.2}%) waiting on barrier,\n\
-        \t{}us ({:.2}%) waiting on locks,\n\
-        \t{}us ({:.2}%) spent on compute\n\
-        \t{:.2}% locks uncontended ({}/{})",
+        "total {}us | \
+        {}us ({:.2}%) waiting on barrier | \
+        {}us ({:.2}%) waiting on locks | \
+        {}us ({:.2}%) spent on compute | \
+        {:.2}% locks uncontended ({}/{})",
         total / 1e3,
         barrier / 1e3,
         barrier * 100.0 / total,

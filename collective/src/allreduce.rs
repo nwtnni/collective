@@ -1,4 +1,5 @@
 use std::cmp;
+use std::env;
 use std::ffi;
 use std::mem;
 
@@ -18,15 +19,13 @@ pub unsafe extern "C" fn MPI_Allreduce(
     _: mpi::ffi::MPI_Op,
     comm: mpi::ffi::MPI_Comm,
 ) -> ffi::c_int {
-    let comm = crate::Communicator(comm);
-
     metrics::time!(metrics::timers::TOTAL, {
         if f32::matches(datatype) {
-            allreduce_sum::<f32>(buffer_send, buffer_receive, count, comm);
+            allreduce::<f32>(buffer_send, buffer_receive, count, comm);
         } else if i32::matches(datatype) {
-            allreduce_sum::<i32>(buffer_send, buffer_receive, count, comm);
+            allreduce::<i32>(buffer_send, buffer_receive, count, comm);
         } else if i8::matches(datatype) {
-            allreduce_sum::<i8>(buffer_send, buffer_receive, count, comm);
+            allreduce::<i8>(buffer_send, buffer_receive, count, comm);
         }
     });
 
@@ -34,15 +33,30 @@ pub unsafe extern "C" fn MPI_Allreduce(
     mpi::ffi::MPI_SUCCESS as ffi::c_int
 }
 
-unsafe fn allreduce_sum<T: MpiType + Copy>(
+unsafe fn allreduce<T: MpiType + Copy>(
     buffer_send: *const ffi::c_void,
     buffer_receive: *mut ffi::c_void,
     count: ffi::c_int,
-    comm: crate::Communicator,
+    comm: mpi::ffi::MPI_Comm,
 ) {
     let buffer_send = std::slice::from_raw_parts(buffer_send as *const T, count as usize);
     let buffer_receive = std::slice::from_raw_parts_mut(buffer_receive as *mut T, count as usize);
+    let comm = crate::Communicator(comm);
 
+    let algorithm = env::var("COLLECTIVE_ALLREDUCE_ALGORITHM");
+
+    match algorithm.as_deref() {
+        Ok("single") | Err(_) => allreduce_single(buffer_send, buffer_receive, comm),
+        Ok("multiple") => todo!(),
+        Ok(algorithm) => panic!("Unknown allreduce algorithm: {}", algorithm),
+    }
+}
+
+unsafe fn allreduce_single<T: MpiType + Copy>(
+    buffer_send: &[T],
+    buffer_receive: &mut [T],
+    comm: crate::Communicator,
+) {
     // | Barrier             |
     // | Region 0 Lock       |
     // | Region 1 Lock       |

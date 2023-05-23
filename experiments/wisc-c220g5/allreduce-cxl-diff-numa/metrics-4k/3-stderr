@@ -1,0 +1,7 @@
+total: 15742us
+	zero: 0.000us (0.00%)
+	copy: 1.09us (0.01%)
+	compute: 1.73us (0.01%)
+	barrier: 15726us (99.90%)
+	mutex: 5.12us (0.03%)
+	mutex-uncontended: 0/1 (0.00%)

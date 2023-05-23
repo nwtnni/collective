@@ -99,3 +99,21 @@ pub fn dump() {
 
 #[cfg(not(feature = "metrics"))]
 pub fn dump() {}
+
+#[cfg(feature = "metrics")]
+pub fn reset() {
+    use std::sync::atomic::Ordering;
+
+    counters::MUTEX_CONTENDED.store(0, Ordering::Release);
+    counters::MUTEX_UNCONTENDED.store(0, Ordering::Release);
+
+    timers::BARRIER.store(0, Ordering::Release);
+    timers::COPY.store(0, Ordering::Release);
+    timers::COMPUTE.store(0, Ordering::Release);
+    timers::MUTEX.store(0, Ordering::Release);
+    timers::TOTAL.store(0, Ordering::Release);
+    timers::ZERO.store(0, Ordering::Release);
+}
+
+#[cfg(not(feature = "metrics"))]
+pub fn reset() {}

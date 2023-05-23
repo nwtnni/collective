@@ -19,6 +19,7 @@ pub unsafe extern "C" fn MPI_Allreduce(
     _: mpi::ffi::MPI_Op,
     comm: mpi::ffi::MPI_Comm,
 ) -> ffi::c_int {
+    metrics::reset();
     metrics::time!(metrics::timers::TOTAL, {
         if f32::matches(datatype) {
             allreduce::<f32>(buffer_send, buffer_receive, count, comm);
@@ -28,7 +29,6 @@ pub unsafe extern "C" fn MPI_Allreduce(
             allreduce::<i8>(buffer_send, buffer_receive, count, comm);
         }
     });
-
     metrics::dump();
     mpi::ffi::MPI_SUCCESS as ffi::c_int
 }

@@ -85,8 +85,10 @@ unsafe fn allreduce_single<T: MpiType + Copy>(
 
         // Zero memory
         if comm.rank() == 0 {
-            locks.fill(0);
-            remainder[offset..][..data_size].fill(0);
+            metrics::time!(metrics::timers::ZERO, {
+                locks.fill(0);
+                remainder[offset..][..data_size].fill(0);
+            });
         }
 
         let (prefix, data, suffix) = remainder[offset..][..data_size].align_to_mut::<T>();
@@ -131,7 +133,9 @@ unsafe fn allreduce_single<T: MpiType + Copy>(
     // Wait for all processes to finish writes
     barrier.wait(comm.rank(), comm.size());
 
-    buffer_receive.copy_from_slice(buffer_shared);
+    metrics::time!(metrics::timers::COPY, {
+        buffer_receive.copy_from_slice(buffer_shared);
+    });
 }
 
 unsafe fn allreduce_multiple<T: MpiType + Copy>(
@@ -163,15 +167,19 @@ unsafe fn allreduce_multiple<T: MpiType + Copy>(
 
     let buffer_shared = &mut remainder[..byte_size];
     if comm.rank() == 0 {
-        buffer_shared.fill(0);
+        metrics::time!(metrics::timers::ZERO, {
+            buffer_shared.fill(0);
+        });
     }
 
     let (prefix, buffer_shared, suffix) = buffer_shared.align_to_mut::<T>();
     assert_eq!(prefix.len(), 0);
     assert_eq!(suffix.len(), 0);
 
-    buffer_shared_send_all[data_size_aligned * comm_rank..][..data_size]
-        .copy_from_slice(buffer_send);
+    metrics::time!(metrics::timers::COPY, {
+        buffer_shared_send_all[data_size_aligned * comm_rank..][..data_size]
+            .copy_from_slice(buffer_send);
+    });
 
     barrier.wait(comm_rank as i32, comm_size as i32);
 
@@ -198,7 +206,10 @@ unsafe fn allreduce_multiple<T: MpiType + Copy>(
     }
 
     barrier.wait(comm.rank(), comm.size());
-    buffer_receive.copy_from_slice(buffer_shared);
+
+    metrics::time!(metrics::timers::COPY, {
+        buffer_receive.copy_from_slice(buffer_shared);
+    });
 }
 
 fn align(value: usize) -> usize {

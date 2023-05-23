@@ -12,8 +12,10 @@ pub mod timers {
 
     pub static BARRIER: AtomicU64 = AtomicU64::new(0);
     pub static COMPUTE: AtomicU64 = AtomicU64::new(0);
+    pub static COPY: AtomicU64 = AtomicU64::new(0);
     pub static MUTEX: AtomicU64 = AtomicU64::new(0);
     pub static TOTAL: AtomicU64 = AtomicU64::new(0);
+    pub static ZERO: AtomicU64 = AtomicU64::new(0);
 }
 
 #[cfg(feature = "metrics")]
@@ -55,29 +57,32 @@ pub(crate) use time;
 
 #[cfg(feature = "metrics")]
 pub fn dump() {
+    use std::sync::atomic::AtomicU64;
     use std::sync::atomic::Ordering;
 
     let total = timers::TOTAL.load(Ordering::Acquire) as f64;
-    let compute = timers::COMPUTE.load(Ordering::Acquire) as f64;
-    let barrier = timers::BARRIER.load(Ordering::Acquire) as f64;
-    let mutex = timers::MUTEX.load(Ordering::Acquire) as f64;
 
     let contended = counters::MUTEX_CONTENDED.load(Ordering::Acquire);
     let uncontended = counters::MUTEX_UNCONTENDED.load(Ordering::Acquire);
 
+    let category = |name, timer: &AtomicU64| {
+        let timer = timer.load(Ordering::Acquire) as f64;
+        eprintln!(
+            "\t{}: {}us ({:.2}%)",
+            name,
+            timer / 1e3,
+            timer * 1e2 / total,
+        );
+    };
+
+    eprintln!("total: {}us", total);
+    category("zero", &timers::ZERO);
+    category("copy", &timers::COPY);
+    category("compute", &timers::COMPUTE);
+    category("barrier", &timers::BARRIER);
+    category("mutex", &timers::MUTEX);
     eprintln!(
-        "total {}us | \
-        {}us ({:.2}%) waiting on barrier | \
-        {}us ({:.2}%) waiting on locks | \
-        {}us ({:.2}%) spent on compute | \
-        {:.2}% locks uncontended ({}/{})",
-        total / 1e3,
-        barrier / 1e3,
-        barrier * 100.0 / total,
-        mutex / 1e3,
-        mutex * 100.0 / total,
-        compute / 1e3,
-        compute * 100.0 / total,
+        "\tmutex-uncontended: {}/{} ({:.2}%)",
         uncontended as f64 * 100.0 / ((contended + uncontended) as f64),
         uncontended,
         uncontended + contended,

@@ -60,22 +60,30 @@ pub fn dump() {
     use std::sync::atomic::AtomicU64;
     use std::sync::atomic::Ordering;
 
-    let total = timers::TOTAL.load(Ordering::Acquire) as f64;
+    let total = timers::TOTAL.load(Ordering::Acquire);
 
     let contended = counters::MUTEX_CONTENDED.load(Ordering::Acquire);
     let uncontended = counters::MUTEX_UNCONTENDED.load(Ordering::Acquire);
 
+    let precision = |value: u64| match value {
+        0..=999 => 3,
+        1_000..=9_999 => 2,
+        10_000..=99_999 => 1,
+        _ => 0,
+    };
+
     let category = |name, timer: &AtomicU64| {
-        let timer = timer.load(Ordering::Acquire) as f64;
+        let timer = timer.load(Ordering::Acquire);
         eprintln!(
-            "\t{}: {}us ({:.2}%)",
+            "\t{}: {:.*}us ({:.2}%)",
             name,
-            timer / 1e3,
-            timer * 1e2 / total,
+            precision(timer),
+            timer as f64 / 1e3,
+            timer as f64 * 1e2 / total as f64,
         );
     };
 
-    eprintln!("total: {}us", total);
+    eprintln!("total: {:.*}us", precision(total), total as f64 / 1e3);
     category("zero", &timers::ZERO);
     category("copy", &timers::COPY);
     category("compute", &timers::COMPUTE);
@@ -83,9 +91,9 @@ pub fn dump() {
     category("mutex", &timers::MUTEX);
     eprintln!(
         "\tmutex-uncontended: {}/{} ({:.2}%)",
-        uncontended as f64 * 100.0 / ((contended + uncontended) as f64),
         uncontended,
         uncontended + contended,
+        uncontended as f64 * 100.0 / ((contended + uncontended) as f64),
     );
 }
 

@@ -178,21 +178,23 @@ unsafe fn allreduce_multiple<T: MpiType + Copy>(
     let partition = cmp::max(crate::PAGE_SIZE, align(byte_size / comm_size)) / mem::size_of::<T>();
 
     if partition * comm_rank < data_size {
-        (0..comm_size)
-            .map(|rank| {
-                let send = &buffer_shared_send_all[data_size_aligned * rank..][..data_size]
-                    [partition * comm_rank..];
-                let len = cmp::min(send.len(), partition);
-                &send[..len]
-            })
-            .for_each(|buffer_send| {
-                let shared = &mut buffer_shared[partition * comm_rank..];
-                let len = cmp::min(shared.len(), partition);
-                shared[..len]
-                    .iter_mut()
-                    .zip(buffer_send)
-                    .for_each(|(shared, send)| shared.sum_mut(send));
-            });
+        metrics::time!(metrics::timers::COMPUTE, {
+            (0..comm_size)
+                .map(|rank| {
+                    let send = &buffer_shared_send_all[data_size_aligned * rank..][..data_size]
+                        [partition * comm_rank..];
+                    let len = cmp::min(send.len(), partition);
+                    &send[..len]
+                })
+                .for_each(|buffer_send| {
+                    let shared = &mut buffer_shared[partition * comm_rank..];
+                    let len = cmp::min(shared.len(), partition);
+                    shared[..len]
+                        .iter_mut()
+                        .zip(buffer_send)
+                        .for_each(|(shared, send)| shared.sum_mut(send));
+                });
+        });
     }
 
     barrier.wait(comm.rank(), comm.size());

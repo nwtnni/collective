@@ -5,18 +5,17 @@ import click
 from fabric import Connection
 
 def download(node):
-    node.run("git clone git@github.com:photoszzt/vhive_setup.git")
-    node.run("./vhive_setup/linux_qemu/download.sh")
+    node.run("GIT_SSH_COMMAND=\"ssh -o StrictHostKeyChecking=no\" git clone git@github.com:photoszzt/vhive_setup.git")
 
     # Temporary workaround for emulab-client-legacy package breaking
-    node.sudo("apt remove emulab-client-legacy")
+    node.sudo("apt remove -y emulab-client-legacy")
 
-    node.run("./vhive_setup/linux_qemu/install_deps.sh")
+    node.run("./vhive_setup/linux_qemu/setup_remote_host/install_deps.sh")
     node.run("source ~/mambaforge/bin/activate")
 
     # Build VM image
-    with node.cd("vhive_setup/linux_qemu"):
-        node.run("make_vmimg.sh")
+    with node.cd("vhive_setup/linux_qemu/setup_vm"):
+        node.run("./make_vmimg.sh")
 
     # Set up 2G shared memory file on NUMA node 1
     node.sudo("mkdir /mnt/cxl_mem")
